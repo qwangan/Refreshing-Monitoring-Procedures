@@ -44,8 +44,7 @@ done
   --general-fdr-target 0.10
 
 "$PYTHON" "$ROOT/analyze_fixed_lambda_benchmarks.py" \
-  --opt-input-dir "$PATHS" --output-dir "$RESULTS/fixed" \
-  --skip-synthetic --workers 8
+  --opt-input-dir "$PATHS" --output-dir "$RESULTS/fixed"
 
 "$PYTHON" "$ROOT/make_paper_outputs.py"
 

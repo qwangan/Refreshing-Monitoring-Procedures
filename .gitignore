@@ -1,0 +1,8 @@
+results/
+LLM/study_paths/
+LLM/.hf-cache-opt13b/
+LLM/.mplconfig/
+NASDAQ-forecast-checkpoints/
+NASDAQ-regenerated.rds
+__pycache__/
+*.pyc

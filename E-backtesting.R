@@ -6,7 +6,14 @@ root <- dirname(normalizePath(sub("^--file=", "", script_arg[[1]])))
 out_dir <- file.path(root, "results")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-input <- readRDS(file.path(root, "NASDAQ.rds"))
+user_args <- commandArgs(trailingOnly = TRUE)
+input_argument <- user_args[startsWith(user_args, "--input=")]
+input_file <- if (length(input_argument)) {
+  sub("--input=", "", input_argument[[length(input_argument)]], fixed = TRUE)
+} else {
+  file.path(root, "NASDAQ.rds")
+}
+input <- readRDS(normalizePath(input_file, mustWork = TRUE))
 backtest <- input$backtest
 figure10 <- input$figure10
 

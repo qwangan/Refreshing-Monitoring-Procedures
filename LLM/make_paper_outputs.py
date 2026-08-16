@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 
 import matplotlib
@@ -27,7 +28,10 @@ PRIMARY = RESULTS / "primary" / "path_metrics.csv"
 PROCESSES = RESULTS / "processes" / "path_metrics.csv"
 FIXED = RESULTS / "fixed" / "opt_path_metrics.csv"
 STUDY_PATHS = ROOT / "study_paths"
-HUMAN_WATERMARK = ROOT / "human_watermark.npz"
+HUMAN_WATERMARK_DEFAULT = ROOT / "human_watermark.npz"
+HUMAN_WATERMARK = Path(
+    os.environ.get("HUMAN_WATERMARK_NPZ", str(HUMAN_WATERMARK_DEFAULT))
+).resolve()
 OUTPUT = RESULTS / "paper_outputs"
 FIGURES = OUTPUT / "figures"
 THRESHOLD_EXACT = 48.897201698676575
@@ -433,7 +437,10 @@ def build_human_watermark_figure() -> None:
     import hashlib
 
     digest = hashlib.sha256(HUMAN_WATERMARK.read_bytes()).hexdigest()
-    if digest != HUMAN_WATERMARK_SHA256:
+    if (
+        HUMAN_WATERMARK == HUMAN_WATERMARK_DEFAULT.resolve()
+        and digest != HUMAN_WATERMARK_SHA256
+    ):
         raise RuntimeError("human/watermark case data failed its SHA-256 check")
 
     with np.load(HUMAN_WATERMARK, allow_pickle=False) as archive:
