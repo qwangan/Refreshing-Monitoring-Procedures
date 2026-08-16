@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the prespecified Efron human-versus-watermark case study.
 
-The selected opening of the Prologue to *Large-Scale Inference* is tokenized once.
+Four paragraphs from printed page x of *Large-Scale Inference* are tokenized once.
 Two disjoint 100-token source spans are replaced by exact full-vocabulary
 Gumbel-max OPT-1.3B continuations, leaving a balanced H-W-H-W-H document of
 the same token length as the source. Human tokens are fixed without inspecting
@@ -47,7 +47,10 @@ from efron_contract import (
     SOURCE_EXCERPT_SHA256,
     SOURCE_OPT_TOKEN_COUNT,
     SOURCE_OPT_TOKEN_SHA256,
-    SOURCE_URL,
+    SOURCE_PARAGRAPHS,
+    SOURCE_PDF_BASENAME,
+    SOURCE_PDF_SHA256,
+    SOURCE_WORDS,
     SWZ_CAP,
     TEMPERATURE,
     THRESHOLD_DISPLAY,
@@ -58,7 +61,7 @@ from efron_contract import (
     validate_static_contract,
 )
 from refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
-DEFAULT_SOURCE = ROOT / "efron_prologue.txt"
+DEFAULT_SOURCE = ROOT / "efron_excerpt.txt"
 DEFAULT_OUTPUT = ROOT.parent / "results" / "llm" / "efron_case"
 TORCH_THREADS = 8
 MPL_CACHE = Path(os.environ.get("EFRON_MPLCONFIGDIR", "/tmp/efron_opt13b_matplotlib"))
@@ -104,7 +107,10 @@ def load_frozen_source(path: Path = DEFAULT_SOURCE) -> str:
     text = path.read_text(encoding="utf-8")
     if sha256_text(text) != SOURCE_EXCERPT_SHA256:
         raise RuntimeError("source excerpt is not the frozen Efron text")
-    if len(text.rstrip("\n").split("\n\n")) != 8 or len(text.split()) != 532:
+    if (
+        len(text.rstrip("\n").split("\n\n")) != SOURCE_PARAGRAPHS
+        or len(text.split()) != SOURCE_WORDS
+    ):
         raise RuntimeError("frozen Efron source structure changed")
     return text
 
@@ -1270,7 +1276,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "case_id": CASE_ID,
         "single_path_descriptive_only": True,
         "no_seed_selection_regeneration_or_outcome_retry": True,
-        "source_url": SOURCE_URL,
+        "source_pdf_basename": SOURCE_PDF_BASENAME,
+        "source_pdf_sha256": SOURCE_PDF_SHA256,
         "source_excerpt_sha256": SOURCE_EXCERPT_SHA256,
         "source_token_count": len(source_ids),
         "source_token_sha256": token_ids_sha256(source_ids),

@@ -26,10 +26,11 @@ Install the packages in `LLM/requirements.txt`, then run:
 bash LLM/run_gpu_study.sh
 ```
 
-The mixed Efron/OPT-1.3B text example can be regenerated from its fixed source excerpt using `LLM/run_efron_case.py`. The supplied `LLM/human_watermark.npz` is the exact saved realization used for the paper figure.
+The mixed Efron/OPT-1.3B text example uses four fixed paragraphs from printed page x of Efron's *Large-Scale Inference*. `LLM/prepare_efron_source.py` reproduces the excerpt from the source PDF, and `LLM/run_efron_case.py` regenerates the prespecified GPU realization. The supplied `LLM/human_watermark.npz` is the coauthor's exact saved realization used for the paper figure.
 
 ```sh
 cd LLM
+python prepare_efron_source.py --pdf BradleyEfron_2010_Prologue_Large-ScaleInferenceE.pdf
 python run_efron_case.py --device cuda
 HUMAN_WATERMARK_NPZ=../results/llm/efron_case/case_arrays.npz \
   python -c "import make_paper_outputs as p; p.build_human_watermark_figure()"

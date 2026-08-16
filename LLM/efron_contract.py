@@ -17,24 +17,29 @@ MODEL_DTYPE = "torch.float32"
 MODEL_PARAMETER_COUNT = 1_315_758_080
 MODEL_VOCAB_SIZE = 50_272
 
-SOURCE_URL = "https://efron.ckirby.su.domains/other/2010LSIexcerpt.pdf"
-SOURCE_TITLE = "Large-Scale Inference: Empirical Bayes Methods for Estimation, Testing, and Prediction"
+SOURCE_PDF_BASENAME = "BradleyEfron_2010_Prologue_Large-ScaleInferenceE.pdf"
+SOURCE_PDF_SHA256 = (
+    "0cf0c89e58c6ec008a08e46972e8d34e8e433dc3e2d86148f99b5b683309787d"
+)
+SOURCE_TITLE = "Large-Scale Inference"
 SOURCE_AUTHOR = "Bradley Efron"
 SOURCE_DATE = "2010"
-SOURCE_PARAGRAPHS = 8
-SOURCE_WORDS = 532
-SOURCE_NORMALIZATION = "user-supplied-prologue-opening-through-real-examples-v1"
+SOURCE_PRINTED_PAGE = "x"
+SOURCE_PHYSICAL_PAGE = 2
+SOURCE_PARAGRAPHS = 4
+SOURCE_WORDS = 365
+SOURCE_NORMALIZATION = "printed-page-x-four-paragraphs-pdf-v1"
 SOURCE_EXCERPT_SHA256 = (
-    "954dd8df3f28ac92aaaf36955b044d747fb9af117cf28a7f682b4364ad647098"
+    "9ff471d30727dd95510a6374f43b6280deaa375657e67e26bf6233f07a7e1e63"
 )
-SOURCE_OPT_TOKEN_COUNT = 655
+SOURCE_OPT_TOKEN_COUNT = 443
 SOURCE_OPT_TOKEN_SHA256 = (
-    "efe39ecae122665f3c819dee7617d1d0a7988caa1a5fb0324d9e70fee5749f9a"
+    "52772f30d7f3a1a4518213a358b8d43e2e48779afed389973884381966ca86ec"
 )
 
-PROMPT = "Large-Scale Inference\nBradley Efron\nPrologue\n\n"
+PROMPT = "Large-Scale Inference\nBradley Efron\n2010\n\n"
 CASE_ID = "efron-large-scale-inference-human-watermark-opt13b-v1"
-CASE_MASTER_SEED = 20260816090442
+CASE_MASTER_SEED = 20260805090442
 BIT_GENERATOR = "PCG64DXSM"
 KEY_STREAM = 0
 ORDINARY_STREAM = 1
@@ -42,8 +47,8 @@ TEMPERATURE = 1.0
 WATERMARK_BLOCKS = 2
 WATERMARK_BLOCK_TOKENS = 100
 MIN_HUMAN_BLOCK_TOKENS = 25
-BLOCK_LENGTHS = (152, 100, 152, 100, 151)
-ALTERNATIVE_INTERVALS = ((153, 252), (405, 504))
+BLOCK_LENGTHS = (81, 100, 81, 100, 81)
+ALTERNATIVE_INTERVALS = ((82, 181), (263, 362))
 
 THRESHOLD_EXACT = 49
 THRESHOLD_DISPLAY = 49
@@ -85,10 +90,13 @@ def contract_payload() -> dict[str, object]:
     return {
         "case_id": CASE_ID,
         "source": {
-            "url": SOURCE_URL,
+            "pdf_basename": SOURCE_PDF_BASENAME,
+            "pdf_sha256": SOURCE_PDF_SHA256,
             "title": SOURCE_TITLE,
             "author": SOURCE_AUTHOR,
             "date": SOURCE_DATE,
+            "printed_page": SOURCE_PRINTED_PAGE,
+            "physical_page": SOURCE_PHYSICAL_PAGE,
             "paragraphs": SOURCE_PARAGRAPHS,
             "words": SOURCE_WORDS,
             "normalization": SOURCE_NORMALIZATION,
