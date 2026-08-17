@@ -38,11 +38,12 @@ HUMAN_WATERMARK_NPZ=../results/llm/efron_case/case_arrays.npz \
 
 ## Financial backtesting
 
-`NASDAQ.csv` contains the daily closing values of the NASDAQ Composite index (`^IXIC`) from January 16, 1996 through December 31, 2025. `NASDAQ-forecasts.R` contains all functions needed to construct the negated percentage log-returns and the rolling 97.5% VaR and ES forecasts under normal, t, skewed-t, and empirical specifications. No code from the earlier E-backtesting repository is required.
+The `Financial Backtesting` directory contains the complete data and code for Section 5.3. `NASDAQ.csv` contains the daily closing values of the NASDAQ Composite index (`^IXIC`) from January 16, 1996 through December 31, 2025. `NASDAQ-forecasts.R` contains all functions needed to construct the negated percentage log-returns and the rolling 97.5% VaR and ES forecasts under normal, t, skewed-t, and empirical specifications. No code from the earlier E-backtesting repository is required.
 
 The forecast calculation uses a 500-day rolling AR(1)-GARCH(1,1) estimation window. It is computationally intensive, so it saves resumable checkpoints after every 100 dates by default.
 
 ```sh
+cd "Financial Backtesting"
 Rscript NASDAQ-forecasts.R --cores=6
 Rscript E-backtesting.R --input=NASDAQ-regenerated.rds
 ```
@@ -50,12 +51,14 @@ Rscript E-backtesting.R --input=NASDAQ-regenerated.rds
 The required R packages are `rugarch` and `sgt`. A single-date check can be run before the complete calculation:
 
 ```sh
+cd "Financial Backtesting"
 Rscript NASDAQ-forecasts.R --validate-date=2021-12-31
 ```
 
 `NASDAQ.rds` is the frozen forecast bundle used for the reported results. It is retained so that Table 3 and Figures 10 and 15 can be reproduced immediately:
 
 ```sh
+cd "Financial Backtesting"
 Rscript E-backtesting.R
 ```
 
