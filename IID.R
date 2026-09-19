@@ -109,7 +109,7 @@ alternative_shocks <- t_index %% 300L == 0L
 mu_recurring <- as.numeric(alternative_recurring)
 mu_shocks <- 50 * as.numeric(alternative_shocks)
 
-pdf(file.path(out_dir, "Figure5.pdf"), width = 8, height = 2.6)
+pdf(file.path(out_dir, "Figure6.pdf"), width = 8, height = 2.6)
 plot(t_index, mu_recurring, type = "s", xlab = "t", ylab = expression(mu[t]),
      col = "#009E73", lwd = 1.2)
 dev.off()
@@ -117,12 +117,12 @@ dev.off()
 set.seed(20260811L)
 representative_recurring <- run_path(mu_recurring)
 plot_refreshing_path(representative_recurring, alternative_recurring,
-                     file.path(out_dir, "Figure6.pdf"))
+                     file.path(out_dir, "Figure7.pdf"))
 
 set.seed(20260806L)
 representative_shocks <- run_path(mu_shocks)
 plot_refreshing_path(representative_shocks, alternative_shocks,
-                     file.path(out_dir, "Figure7.pdf"), shocks = TRUE)
+                     file.path(out_dir, "Figure8.pdf"), shocks = TRUE)
 
 monte_carlo <- function(mu, alternative, seed) {
   set.seed(seed)

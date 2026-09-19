@@ -6,5 +6,3 @@ torch>=2.2
 transformers>=4.57,<5
 huggingface-hub>=0.36,<1
 matplotlib>=3.8,<4
-pypdf>=6,<7
-pytest>=8,<9

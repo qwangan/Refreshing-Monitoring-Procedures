@@ -18,6 +18,46 @@ BINOMIAL_PMF = np.asarray(
 BINOMIAL_CDF_LOWER = np.concatenate(
     (np.asarray([0.0], dtype=np.float64), np.cumsum(BINOMIAL_PMF[:-1]))
 )
+FLOAT32_MASS_TOLERANCE = 8.0 * np.finfo(np.float32).eps
+
+
+def normalize_float32_tournament_mass(updated_probabilities):
+    """Remove float32 roundoff below zero and normalize each probability row.
+
+    The Tournament update is nonnegative and has unit mass mathematically.
+    When its Bernoulli mass ``q`` rounds just above one, float32 can nevertheless
+    create tiny negative entries. Values within a documented machine-precision
+    tolerance are clipped; larger negatives still fail loudly.
+    """
+
+    if str(updated_probabilities.dtype) != "torch.float32":
+        raise TypeError("Tournament mass repair requires torch.float32 input")
+    if updated_probabilities.ndim not in (1, 2):
+        raise ValueError("Tournament probabilities must be one- or two-dimensional")
+
+    was_vector = updated_probabilities.ndim == 1
+    rows = updated_probabilities.unsqueeze(0) if was_vector else updated_probabilities
+    row_minimum = rows.amin(dim=1)
+    if not bool(row_minimum.isfinite().all()):
+        raise RuntimeError("Tournament recursion produced nonfinite mass")
+    worst = float(row_minimum.min().item())
+    if worst < -FLOAT32_MASS_TOLERANCE:
+        raise RuntimeError(
+            "Tournament recursion produced material negative mass: "
+            f"{worst:.9g} < {-FLOAT32_MASS_TOLERANCE:.9g}"
+        )
+
+    clipped = rows.clamp_min(0.0)
+    totals = clipped.sum(dim=1, keepdim=True)
+    if not bool(totals.isfinite().all()) or bool((totals <= 0.0).any()):
+        raise RuntimeError("Tournament recursion lost all probability mass")
+    roundoff = (-row_minimum).clamp_min(0.0).maximum(
+        (totals[:, 0] - 1.0).abs()
+    )
+    normalized = clipped / totals
+    if was_vector:
+        return normalized[0], roundoff[0]
+    return normalized, roundoff
 
 
 def tournament_distribution(

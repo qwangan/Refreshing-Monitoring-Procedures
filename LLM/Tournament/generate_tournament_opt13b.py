@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resumable generator for the fresh OPT-1.3B multi-region study.
+"""Resumable generator for the locked OPT-1.3B Tournament study.
 
 This module deliberately generates and checkpoints *pivots*, not detector
 outputs.  Every detector in the study can therefore be replayed on exactly the
@@ -9,19 +9,15 @@ Locked OPT-1.3B design (1,400 fresh paths)
 -------------------------------------------
 * T=600 and 20 frozen prompts.
 * Temperatures 0.75 and 1.0 only, with no top-k/top-p truncation and no EOS stop.
-* Primary two-region case: L=200,G=50; 500 paths/temperature.
-* Four-region stress case: L=50,G=25; 200 paths/temperature.
+* Primary two-region schedule [51,250] U [301,500], 500 paths/temperature.
+* Four-region stress case: L=50,G=25; 200 paths/temp.
 
-At a watermarked position a fresh full-vocabulary key U is drawn and the token
-is selected by exact Gumbel-max,
-
-    argmax_v { logits_v / temperature - log(-log(U_v)) }.
-
-At a null position the token is sampled from the ordinary full-vocabulary NTP
-distribution using a separate RNG stream; the fresh key is not inspected by
-the sampler.  Thus the selected pivot U[token] is conditionally Uniform(0,1)
-at a null position.  A fresh key vector is nevertheless drawn at *every*
-position so that the data layout and key stream do not depend on the schedule.
+At a watermarked position, thirty fresh full-vocabulary Bernoulli(1/2) layers
+implement the exact distributional Tournament recursion. At an ordinary
+position the token is sampled directly from the full-vocabulary NTP law before
+the selected token's thirty unused table bits are lazily drawn. A separate
+stream draws the randomized-Binomial PIT variable V. Checkpoints save the
+selected g-vector, S, V, Y and L, so every detector is replayed from one trace.
 
 Random streams are keyed by a stable hash of the scenario, replicate and
 stream role.  Consequently paths do not change when jobs are reordered,
@@ -48,6 +44,16 @@ from typing import Sequence
 
 import numpy as np
 
+from tournament_watermark import (
+    LAYERS,
+    binomial_randomized_pit,
+    normalize_float32_tournament_mass,
+    stable_calibrator,
+)
+
+
+ROOT = Path(__file__).resolve().parent
+
 
 MODEL_NAME = "facebook/opt-1.3b"
 MODEL_REVISION = "3f5c25d0bc631cb57ac65913f76e22c2dfb61d62"
@@ -59,12 +65,14 @@ TOTAL_MODEL_PATHS = 1_400
 LOCKED_DTYPE = "torch.float32"
 BIT_GENERATOR_NAME = "PCG64DXSM"
 SCHEMA_VERSION = 1
-GENERATION_ALGORITHM_VERSION = "opt13b-full-vocab-gumbel-batch-v1"
+GENERATION_ALGORITHM_VERSION = "opt13b-full-vocab-tournament-m30-v2-roundoff-repair"
 DEFAULT_BATCH_SIZE = 10
 DEFAULT_TORCH_THREADS = 8
 TORCH_INTEROP_THREADS = 1
-KEY_STREAM = 0
+TABLE_STREAM = 0
 ORDINARY_STREAM = 1
+PIVOT_STREAM = 2
+TOURNAMENT_SAMPLE_STREAM = 3
 
 
 # Frozen before confirmatory generation.  These are original prompts, span
@@ -132,6 +140,14 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def stable_uint32_words(value: object, n_words: int = 4) -> tuple[int, ...]:
     digest = hashlib.sha256(canonical_json(value).encode("utf-8")).digest()
     return tuple(int.from_bytes(digest[4 * i : 4 * i + 4], "little") for i in range(n_words))
@@ -180,11 +196,13 @@ def _main_scenarios_for_temperatures(
 ) -> list[ScenarioSpec]:
     scenarios: list[ScenarioSpec] = []
     for temperature in temperatures:
-        primary = two_region_schedule(200, 50)
+        # Keep the certified central-scenario ID and seed namespace so the
+        # master-seed derivation remains unchanged from the old package.
+        schedule = two_region_schedule(200, 50)
         scenarios.append(
             ScenarioSpec(
-                scenario_id=f"core_{primary.schedule_id}_temp{temperature_label(temperature)}",
-                schedule=primary,
+                scenario_id=f"core_{schedule.schedule_id}_temp{temperature_label(temperature)}",
+                schedule=schedule,
                 temperature=temperature,
                 n_paths=500,
             )
@@ -203,7 +221,7 @@ def _main_scenarios_for_temperatures(
 
 
 def study_scenarios() -> list[ScenarioSpec]:
-    """The only scientific OPT-1.3B design: temperatures 0.75 and 1.0."""
+    """The only scientific Tournament design: 1,400 paths at two temperatures."""
 
     scenarios = _main_scenarios_for_temperatures(STUDY_TEMPERATURES)
     if sum(s.n_paths for s in scenarios) != TOTAL_MODEL_PATHS:
@@ -225,7 +243,7 @@ def development_scenarios() -> list[ScenarioSpec]:
             scenario_id=f"dev_two_l200_g050_temp{temperature_label(temperature)}",
             schedule=two_region_schedule(200, 50),
             temperature=temperature,
-            n_paths=10,
+            n_paths=20,
         )
         for temperature in STUDY_TEMPERATURES
     ]
@@ -324,7 +342,12 @@ def build_manifest(
 
 
 def rng_for_path(spec: PathSpec, stream_id: int) -> np.random.Generator:
-    if stream_id not in (KEY_STREAM, ORDINARY_STREAM):
+    if stream_id not in (
+        TABLE_STREAM,
+        ORDINARY_STREAM,
+        PIVOT_STREAM,
+        TOURNAMENT_SAMPLE_STREAM,
+    ):
         raise ValueError(f"unknown stream {stream_id}")
     # Each component must be a nonnegative uint32 for SeedSequence.spawn_key.
     spawn_key = (*spec.scenario_seed_words, int(spec.replicate), int(stream_id))
@@ -351,13 +374,24 @@ def design_payload(
     return {
         "schema_version": SCHEMA_VERSION,
         "generation_algorithm_version": GENERATION_ALGORITHM_VERSION,
+        "implementation_sha256": {
+            "generator": sha256_file(Path(__file__).resolve()),
+            "tournament_math": sha256_file(
+                ROOT / "tournament_watermark.py"
+            ),
+        },
         "profile": profile,
         "model_name": MODEL_NAME,
         "model_revision": MODEL_REVISION,
         "dtype": LOCKED_DTYPE,
         "master_seed": MASTER_SEED,
         "bit_generator": BIT_GENERATOR_NAME,
-        "stream_roles": {"key": KEY_STREAM, "ordinary_token": ORDINARY_STREAM},
+        "stream_roles": {
+            "tournament_table": TABLE_STREAM,
+            "ordinary_token": ORDINARY_STREAM,
+            "randomized_pit_v": PIVOT_STREAM,
+            "tournament_final_sample": TOURNAMENT_SAMPLE_STREAM,
+        },
         "planned_batch_size": batch_size,
         "torch_num_threads": num_threads,
         "torch_num_interop_threads": TORCH_INTEROP_THREADS,
@@ -372,10 +406,16 @@ def design_payload(
             "top_p": None,
             "repetition_penalty": None,
             "stop_at_eos": False,
-            "watermark_sampler": "exact full-vocabulary Gumbel-max",
+            "watermark_sampler": "exact full-vocabulary 30-layer Tournament recursion",
             "null_sampler": "ordinary full-vocabulary categorical sample",
-            "fresh_full_key_at_every_position": True,
-            "separate_key_and_ordinary_rng_streams": True,
+            "tournament_layers": LAYERS,
+            "competitors_per_match": 2,
+            "g_distribution": "iid Bernoulli(1/2)",
+            "fresh_full_table_at_watermarked_positions": True,
+            "ordinary_lazy_selected_g_bits": True,
+            "repeated_context_masking": False,
+            "ideal_random_function_no_hash_or_context_prf": True,
+            "separate_table_ordinary_pit_and_tournament_sample_streams": True,
         },
         "prompt_scored": False,
         "prompt_hashes": [prompt_sha256(i) for i in range(len(PROMPTS))],
@@ -426,8 +466,10 @@ def write_manifest_atomic(path: Path, specs: Sequence[PathSpec]) -> None:
         "generation_batch_uid",
         "generation_batch_size",
         "generation_batch_position",
-        "key_seed_words",
+        "table_seed_words",
         "ordinary_seed_words",
+        "pivot_v_seed_words",
+        "tournament_sample_seed_words",
         "checkpoint_relpath",
     )
     temporary = path.with_name(path.name + ".tmp")
@@ -449,8 +491,12 @@ def write_manifest_atomic(path: Path, specs: Sequence[PathSpec]) -> None:
                     "generation_batch_uid": spec.generation_batch_uid,
                     "generation_batch_size": spec.generation_batch_size,
                     "generation_batch_position": spec.generation_batch_position,
-                    "key_seed_words": ",".join(map(str, rng_seed_words(spec, KEY_STREAM))),
+                    "table_seed_words": ",".join(map(str, rng_seed_words(spec, TABLE_STREAM))),
                     "ordinary_seed_words": ",".join(map(str, rng_seed_words(spec, ORDINARY_STREAM))),
+                    "pivot_v_seed_words": ",".join(map(str, rng_seed_words(spec, PIVOT_STREAM))),
+                    "tournament_sample_seed_words": ",".join(
+                        map(str, rng_seed_words(spec, TOURNAMENT_SAMPLE_STREAM))
+                    ),
                     "checkpoint_relpath": f"checkpoints/{spec.path_uid}.npz",
                 }
             )
@@ -475,6 +521,12 @@ def checkpoint_metadata(spec: PathSpec, generated: dict, versions: dict) -> dict
     return {
         "schema_version": SCHEMA_VERSION,
         "generation_algorithm_version": GENERATION_ALGORITHM_VERSION,
+        "implementation_sha256": {
+            "generator": sha256_file(Path(__file__).resolve()),
+            "tournament_math": sha256_file(
+                ROOT / "tournament_watermark.py"
+            ),
+        },
         "path_spec": asdict(spec),
         "model_name": MODEL_NAME,
         "model_revision": MODEL_REVISION,
@@ -486,8 +538,12 @@ def checkpoint_metadata(spec: PathSpec, generated: dict, versions: dict) -> dict
             "top_p": None,
             "stop_at_eos": False,
         },
-        "key_seed_words": rng_seed_words(spec, KEY_STREAM),
+        "table_seed_words": rng_seed_words(spec, TABLE_STREAM),
         "ordinary_seed_words": rng_seed_words(spec, ORDINARY_STREAM),
+        "pivot_v_seed_words": rng_seed_words(spec, PIVOT_STREAM),
+        "tournament_sample_seed_words": rng_seed_words(
+            spec, TOURNAMENT_SAMPLE_STREAM
+        ),
         "generation_seconds": float(generated["generation_seconds"]),
         "batch_generation_seconds": float(generated["batch_generation_seconds"]),
         "generation_batch_uid": spec.generation_batch_uid,
@@ -500,7 +556,11 @@ def checkpoint_metadata(spec: PathSpec, generated: dict, versions: dict) -> dict
 def save_checkpoint_atomic(path: Path, spec: PathSpec, generated: dict, versions: dict) -> None:
     arrays = {
         "token_id": np.asarray(generated["token_id"], dtype=np.int32),
+        "selected_g": np.asarray(generated["selected_g"], dtype=np.uint8),
+        "pivot_s": np.asarray(generated["pivot_s"], dtype=np.uint8),
+        "pivot_v": np.asarray(generated["pivot_v"], dtype=np.float64),
         "pivot_y": np.asarray(generated["pivot_y"], dtype=np.float64),
+        "calibrator_l": np.asarray(generated["calibrator_l"], dtype=np.float64),
         "is_watermarked": np.asarray(generated["is_watermarked"], dtype=np.bool_),
         "selected_model_probability": np.asarray(
             generated["selected_model_probability"], dtype=np.float64
@@ -508,6 +568,9 @@ def save_checkpoint_atomic(path: Path, spec: PathSpec, generated: dict, versions
         "max_model_probability": np.asarray(generated["max_model_probability"], dtype=np.float64),
         "model_entropy_nats": np.asarray(generated["model_entropy_nats"], dtype=np.float64),
         "is_eos": np.asarray(generated["is_eos"], dtype=np.bool_),
+        "max_mass_correction": np.asarray(
+            generated["max_mass_correction"], dtype=np.float64
+        ),
     }
     metadata = checkpoint_metadata(spec, generated, versions)
     metadata["content_sha256"] = array_content_sha256(arrays, metadata)
@@ -530,12 +593,17 @@ def load_and_validate_checkpoint(path: Path, expected: PathSpec | None = None) -
     with np.load(path, allow_pickle=False) as data:
         required = {
             "token_id",
+            "selected_g",
+            "pivot_s",
+            "pivot_v",
             "pivot_y",
+            "calibrator_l",
             "is_watermarked",
             "selected_model_probability",
             "max_model_probability",
             "model_entropy_nats",
             "is_eos",
+            "max_mass_correction",
             "continuation",
             "metadata_json",
         }
@@ -550,6 +618,14 @@ def load_and_validate_checkpoint(path: Path, expected: PathSpec | None = None) -
         raise ValueError(f"checkpoint {path} has wrong schema version")
     if metadata.get("generation_algorithm_version") != GENERATION_ALGORITHM_VERSION:
         raise ValueError(f"checkpoint {path} has the wrong generation-algorithm version")
+    expected_implementation = {
+        "generator": sha256_file(Path(__file__).resolve()),
+        "tournament_math": sha256_file(
+            ROOT / "tournament_watermark.py"
+        ),
+    }
+    if metadata.get("implementation_sha256") != expected_implementation:
+        raise ValueError(f"checkpoint {path} was produced by different source code")
     if metadata.get("model_name") != MODEL_NAME or metadata.get("model_revision") != MODEL_REVISION:
         raise ValueError(f"checkpoint {path} was generated from a different model checkpoint")
     content_hash = metadata.get("content_sha256")
@@ -569,8 +645,13 @@ def load_and_validate_checkpoint(path: Path, expected: PathSpec | None = None) -
         if float(metadata.get("decoder", {}).get("temperature", math.nan)) != expected.temperature:
             raise ValueError(f"checkpoint {path} was generated at a different temperature")
         n = expected.horizon
-        if any(array.shape != (n,) for array in arrays.values()):
-            raise ValueError(f"checkpoint {path} contains an array of the wrong length")
+        for name, array in arrays.items():
+            expected_shape = (n, LAYERS) if name == "selected_g" else (n,)
+            if array.shape != expected_shape:
+                raise ValueError(
+                    f"checkpoint {path} has shape {array.shape} for {name}, "
+                    f"expected {expected_shape}"
+                )
         expected_mask = schedule_mask(
             ScheduleSpec(expected.schedule_id, expected.intended_regions), expected.horizon
         )
@@ -580,6 +661,16 @@ def load_and_validate_checkpoint(path: Path, expected: PathSpec | None = None) -
     pivots = arrays["pivot_y"]
     if not np.all(np.isfinite(pivots)) or np.any(pivots <= 0.0) or np.any(pivots >= 1.0):
         raise ValueError(f"checkpoint {path} has invalid pivots")
+    selected_g = arrays["selected_g"]
+    if np.any((selected_g != 0) & (selected_g != 1)):
+        raise ValueError(f"checkpoint {path} contains non-Bernoulli selected g-values")
+    if not np.array_equal(selected_g.sum(axis=1), arrays["pivot_s"]):
+        raise ValueError(f"checkpoint {path} has an inconsistent Tournament score")
+    expected_y = binomial_randomized_pit(arrays["pivot_s"], arrays["pivot_v"])
+    if not np.array_equal(expected_y, arrays["pivot_y"]):
+        raise ValueError(f"checkpoint {path} has an inconsistent randomized PIT")
+    if not np.array_equal(stable_calibrator(expected_y), arrays["calibrator_l"]):
+        raise ValueError(f"checkpoint {path} has an inconsistent calibrator trace")
     probabilities = arrays["selected_model_probability"]
     if np.any(probabilities < 0.0) or np.any(probabilities > 1.0) or not np.all(np.isfinite(probabilities)):
         raise ValueError(f"checkpoint {path} has invalid selected-token probabilities")
@@ -625,25 +716,47 @@ def generate_path_batch(
     torch,
     logsumexp,
 ) -> list[dict]:
-    """Generate one stable homogeneous batch with independent path RNGs."""
+    """Generate one stable homogeneous batch with independent path RNGs.
 
+    The thirty full-vocabulary Bernoulli layers are materialized only at
+    watermarked positions. At ordinary positions only the selected token's
+    thirty unused coordinates are drawn, the exact lazy-sampling equivalent.
+    """
+
+    del logsumexp
     validate_batch(specs)
     first = specs[0]
     batch_size = len(specs)
-    key_rngs = [rng_for_path(spec, KEY_STREAM) for spec in specs]
     ordinary_rngs = [rng_for_path(spec, ORDINARY_STREAM) for spec in specs]
+    pivot_rngs = [rng_for_path(spec, PIVOT_STREAM) for spec in specs]
+    tournament_sample_rngs = [
+        rng_for_path(spec, TOURNAMENT_SAMPLE_STREAM) for spec in specs
+    ]
     watermark_mask = schedule_mask(
         ScheduleSpec(first.schedule_id, first.intended_regions), first.horizon
     )
     vocab_size = int(model.config.vocab_size)
     eos_id = tokenizer.eos_token_id
+    device = prompt_ids.device
+    table_generators = []
+    for spec in specs:
+        words = rng_seed_words(spec, TABLE_STREAM)
+        seed64 = int(words[0]) | (int(words[1]) << 32)
+        generator = torch.Generator(device=device)
+        generator.manual_seed(seed64)
+        table_generators.append(generator)
 
     token_ids = np.empty((batch_size, first.horizon), dtype=np.int32)
+    selected_g = np.empty((batch_size, first.horizon, LAYERS), dtype=np.uint8)
+    pivot_s = np.empty((batch_size, first.horizon), dtype=np.uint8)
+    pivot_v = np.empty((batch_size, first.horizon), dtype=np.float64)
     pivots = np.empty((batch_size, first.horizon), dtype=np.float64)
+    calibrator_l = np.empty((batch_size, first.horizon), dtype=np.float64)
     selected_probs = np.empty((batch_size, first.horizon), dtype=np.float64)
     max_probs = np.empty((batch_size, first.horizon), dtype=np.float64)
     entropies = np.empty((batch_size, first.horizon), dtype=np.float64)
     is_eos = np.empty((batch_size, first.horizon), dtype=np.bool_)
+    max_mass_correction = np.zeros((batch_size, first.horizon), dtype=np.float64)
 
     started = time.perf_counter()
     with torch.inference_mode():
@@ -651,56 +764,141 @@ def generate_path_batch(
         # batch row and the model creates a fresh mutable KV cache for the batch.
         batch_prompt_ids = prompt_ids.repeat(batch_size, 1)
         initial = model(batch_prompt_ids, use_cache=True)
-        next_logits = initial.logits[:, -1, :].detach().cpu().double().numpy()
+        next_logits = initial.logits[:, -1, :].detach()
+        if next_logits.dtype != torch.float32:
+            raise RuntimeError("OPT logits are not float32")
         past = initial.past_key_values
 
         for zero_t in range(first.horizon):
             scaled_logits = next_logits / first.temperature
-            finite = np.isfinite(scaled_logits)
-            if not np.all(finite):
-                scaled_logits = scaled_logits.copy()
-                scaled_logits[~finite] = -np.inf
-            log_probs = scaled_logits - logsumexp(scaled_logits, axis=1, keepdims=True)
-            probs = np.exp(log_probs)
-            probs /= probs.sum(axis=1, keepdims=True)
-            if not np.all(np.isfinite(probs)) or not np.allclose(probs.sum(axis=1), 1.0):
+            finite = torch.isfinite(scaled_logits)
+            scaled_logits = torch.where(
+                finite, scaled_logits, torch.full_like(scaled_logits, -torch.inf)
+            )
+            log_probs = torch.log_softmax(scaled_logits, dim=1)
+            probs = torch.softmax(scaled_logits, dim=1)
+            if not bool(torch.all(torch.isfinite(probs))) or not bool(
+                torch.allclose(
+                    probs.sum(dim=1),
+                    torch.ones(batch_size, dtype=torch.float32, device=device),
+                    rtol=2e-5,
+                    atol=2e-5,
+                )
+            ):
                 raise RuntimeError(
                     f"invalid NTP distribution for batch {first.generation_batch_uid}, "
                     f"t={zero_t + 1}"
                 )
 
-            # RNG objects are independent and path-specific.  Drawing row by
-            # row, rather than from one batch RNG, makes the random inputs
-            # invariant to batching and resumption.
-            key_u = np.stack(
-                [rng.random(vocab_size, dtype=np.float64) for rng in key_rngs], axis=0
-            )
-            np.maximum(key_u, np.nextafter(0.0, 1.0), out=key_u)
-
             if watermark_mask[zero_t]:
-                scores = scaled_logits - np.log(-np.log(key_u))
-                chosen_ids = np.argmax(scores, axis=1).astype(np.int64, copy=False)
-            else:
-                # Row j never inspects key_u[j] when selecting its null token.
-                chosen_ids = np.asarray(
+                tournament_probs = probs.clone()
+                g_layers = []
+                largest_correction = torch.zeros(
+                    batch_size, dtype=torch.float32, device=device
+                )
+                for _layer in range(LAYERS):
+                    g = torch.stack(
+                        [
+                            torch.randint(
+                                0,
+                                2,
+                                (vocab_size,),
+                                dtype=torch.uint8,
+                                device=device,
+                                generator=generator,
+                            )
+                            for generator in table_generators
+                        ],
+                        dim=0,
+                    )
+                    g_layers.append(g)
+                    g_float = g.to(dtype=torch.float32)
+                    q = torch.sum(tournament_probs * g_float, dim=1, keepdim=True)
+                    updated_probs = tournament_probs * (1.0 + g_float - q)
+                    tournament_probs, correction = normalize_float32_tournament_mass(
+                        updated_probs
+                    )
+                    largest_correction = torch.maximum(
+                        largest_correction, correction
+                    )
+                chosen_list = []
+                for j in range(batch_size):
+                    u = float(tournament_sample_rngs[j].random())
+                    cdf = torch.cumsum(tournament_probs[j], dim=0)
+                    chosen = int(
+                        torch.searchsorted(
+                            cdf,
+                            torch.tensor(u, dtype=torch.float32, device=device),
+                            right=False,
+                        ).item()
+                    )
+                    chosen_list.append(min(chosen, vocab_size - 1))
+                chosen_ids = np.asarray(chosen_list, dtype=np.int64)
+                chosen_tensor = torch.as_tensor(chosen_ids, device=device)
+                bits = torch.stack(
                     [
-                        ordinary_rngs[j].choice(vocab_size, p=probs[j])
-                        for j in range(batch_size)
+                        layer[torch.arange(batch_size, device=device), chosen_tensor]
+                        for layer in g_layers
                     ],
-                    dtype=np.int64,
+                    dim=1,
+                )
+                selected_g[:, zero_t, :] = bits.cpu().numpy()
+                max_mass_correction[:, zero_t] = (
+                    largest_correction.double().cpu().numpy()
+                )
+            else:
+                chosen_list = []
+                for j in range(batch_size):
+                    u = float(ordinary_rngs[j].random())
+                    cdf = torch.cumsum(probs[j], dim=0)
+                    chosen = int(
+                        torch.searchsorted(
+                            cdf,
+                            torch.tensor(u, dtype=torch.float32, device=device),
+                            right=False,
+                        ).item()
+                    )
+                    chosen_list.append(min(chosen, vocab_size - 1))
+                chosen_ids = np.asarray(chosen_list, dtype=np.int64)
+                # Lazy sampling: these bits are drawn only after ordinary token
+                # selection and therefore cannot influence that selection.
+                selected_g[:, zero_t, :] = np.stack(
+                    [
+                        torch.randint(
+                            0,
+                            2,
+                            (LAYERS,),
+                            dtype=torch.uint8,
+                            device=device,
+                            generator=generator,
+                        )
+                        .cpu()
+                        .numpy()
+                        for generator in table_generators
+                    ],
+                    axis=0,
                 )
 
             rows = np.arange(batch_size)
             token_ids[:, zero_t] = chosen_ids
-            pivots[:, zero_t] = key_u[rows, chosen_ids]
-            selected_probs[:, zero_t] = probs[rows, chosen_ids]
-            max_probs[:, zero_t] = probs.max(axis=1)
-            # Nonfinite input logits were assigned probability zero and are
-            # omitted row by row to avoid the indeterminate product 0*(-inf).
-            for j in range(batch_size):
-                entropies[j, zero_t] = float(
-                    -np.dot(probs[j, finite[j]], log_probs[j, finite[j]])
-                )
+            scores = selected_g[:, zero_t, :].sum(axis=1, dtype=np.uint16)
+            pivot_s[:, zero_t] = scores.astype(np.uint8)
+            v_now = np.asarray(
+                [rng.random() for rng in pivot_rngs], dtype=np.float64
+            )
+            pivot_v[:, zero_t] = v_now
+            y_now = binomial_randomized_pit(scores, v_now)
+            pivots[:, zero_t] = y_now
+            calibrator_l[:, zero_t] = stable_calibrator(y_now)
+            rows_t = torch.arange(batch_size, device=device)
+            chosen_t = torch.as_tensor(chosen_ids, dtype=torch.long, device=device)
+            selected_probs[:, zero_t] = probs[rows_t, chosen_t].double().cpu().numpy()
+            max_probs[:, zero_t] = probs.max(dim=1).values.double().cpu().numpy()
+            entropy = -torch.sum(
+                torch.where(probs > 0, probs * log_probs, torch.zeros_like(probs)),
+                dim=1,
+            )
+            entropies[:, zero_t] = entropy.double().cpu().numpy()
             if eos_id is None:
                 is_eos[:, zero_t] = False
             else:
@@ -708,7 +906,7 @@ def generate_path_batch(
 
             chosen = torch.as_tensor(chosen_ids[:, None], dtype=torch.long, device=prompt_ids.device)
             updated = model(chosen, past_key_values=past, use_cache=True)
-            next_logits = updated.logits[:, -1, :].detach().cpu().double().numpy()
+            next_logits = updated.logits[:, -1, :].detach()
             past = updated.past_key_values
 
     batch_seconds = time.perf_counter() - started
@@ -722,12 +920,17 @@ def generate_path_batch(
         results.append(
             {
                 "token_id": token_ids[j],
+                "selected_g": selected_g[j],
+                "pivot_s": pivot_s[j],
+                "pivot_v": pivot_v[j],
                 "pivot_y": pivots[j],
+                "calibrator_l": calibrator_l[j],
                 "is_watermarked": watermark_mask.copy(),
                 "selected_model_probability": selected_probs[j],
                 "max_model_probability": max_probs[j],
                 "model_entropy_nats": entropies[j],
                 "is_eos": is_eos[j],
+                "max_mass_correction": max_mass_correction[j],
                 # Per-path share is useful for aggregation; total batch time is
                 # retained separately so runtime accounting is never ambiguous.
                 "generation_seconds": batch_seconds / batch_size,
@@ -992,7 +1195,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(__file__).resolve().parent / "fresh_paths",
+        default=ROOT / "study_paths",
     )
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument(

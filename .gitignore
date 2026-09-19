@@ -2,6 +2,9 @@ results/
 LLM/Gumbel-max/study_paths/
 LLM/Gumbel-max/.hf-cache-opt13b/
 LLM/Gumbel-max/.mplconfig/
+LLM/Tournament/study_paths/
+LLM/Tournament/.hf-cache-opt13b/
+LLM/Tournament/.mplconfig/
 NASDAQ-forecast-checkpoints/
 NASDAQ-regenerated.rds
 __pycache__/

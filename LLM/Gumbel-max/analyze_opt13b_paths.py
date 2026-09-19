@@ -88,13 +88,11 @@ def method_configuration(target: float) -> tuple[tuple[str, ...], dict[str, str]
     general_one_shot = f"swz_one_shot_{calibration}"
     general_whole_block = f"swz_refresh_whole_block_{calibration}"
     general_local = f"swz_refresh_local_{calibration}"
-    general_block = f"swz_block_reset_local_{calibration}"
     percentage = int(round(100.0 * target))
     order = (
         general_one_shot,
         general_whole_block,
         general_local,
-        general_block,
     )
     labels = {
         general_one_shot: (
@@ -108,14 +106,10 @@ def method_configuration(target: float) -> tuple[tuple[str, ...], dict[str, str]
             "SWZ adaptive + refresh + global-min localizer "
             f"(general {percentage}% threshold)"
         ),
-        general_block: (
-            f"Block-reset adaptive extension + localizer (general {percentage}% threshold)"
-        ),
     }
     pairs = (
         (general_local, general_one_shot),
         (general_local, general_whole_block),
-        (general_local, general_block),
     )
     return order, labels, pairs, calibration
 
@@ -333,29 +327,20 @@ def replay_methods(
         threshold=general_threshold,
         cap=ADAPTIVE_CAP,
     )
-    block_general = run_refreshing_from_pivots(
-        pivots,
-        strategy="adaptive_block_reset",
-        threshold=general_threshold,
-        cap=ADAPTIVE_CAP,
-    )
     general_one_shot = f"swz_one_shot_{general_calibration}"
     general_whole_block = f"swz_refresh_whole_block_{general_calibration}"
     general_local = f"swz_refresh_local_{general_calibration}"
-    general_block = f"swz_block_reset_local_{general_calibration}"
     reports = {
         general_one_shot: [cumulative_general.reports[0].as_dict()]
         if cumulative_general.reports
         else [],
         general_whole_block: _whole_block_reports(cumulative_general.reports),
         general_local: cumulative_general.report_dicts(),
-        general_block: block_general.report_dicts(),
     }
     traces = {
         general_one_shot: cumulative_general,
         general_whole_block: cumulative_general,
         general_local: cumulative_general,
-        general_block: block_general,
     }
     return reports, traces
 
@@ -956,7 +941,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     profile = str(design.get("profile"))
     if profile == "study":
         scenarios = generation.study_scenarios()
-        expected_paths = 4_700
+        expected_paths = generation.TOTAL_MODEL_PATHS
     else:
         raise RuntimeError(f"unsupported saved-path profile: {profile}")
     specs = generation.build_manifest(scenarios, batch_size=generation.DEFAULT_BATCH_SIZE)

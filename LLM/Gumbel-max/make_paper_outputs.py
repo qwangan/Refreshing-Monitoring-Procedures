@@ -184,13 +184,13 @@ def build_tables() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
             & primary_frame["method"].isin(MONITORING_METHODS)
         ]
     )
-    table4 = aggregate(
+    table_b6 = aggregate(
         primary_frame[
             (primary_frame["schedule_id"] == "four_l050_g025")
             & (primary_frame["method"] == "swz_refresh_local_general_fdr10")
         ]
     )
-    table5 = pd.concat(
+    table_b8 = pd.concat(
         [
             aggregate(
                 process_frame[
@@ -210,37 +210,37 @@ def build_tables() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
         table2["method"] == "swz_refresh_local_general_fdr10"
     ].set_index("temperature")["mean_lambda"]
     for method in ("wa_refresh_general_fdr10", "average_refresh_general_fdr10"):
-        mask = table5["method"] == method
-        table5.loc[mask, "mean_lambda"] = table5.loc[mask, "temperature"].map(
+        mask = table_b8["method"] == method
+        table_b8.loc[mask, "mean_lambda"] = table_b8.loc[mask, "temperature"].map(
             wa_lambda
         )
 
     all_rows = pd.concat(
         [
             table2.assign(table="Table 2"),
-            table4.assign(table="Table 4"),
-            table5.assign(table="Table 5"),
+            table_b6.assign(table="Table B.6"),
+            table_b8.assign(table="Table B.8"),
         ],
         ignore_index=True,
     )
     OUTPUT.mkdir(parents=True, exist_ok=True)
     table2.to_csv(OUTPUT / "table2_monitoring_comparison.csv", index=False)
-    table4.to_csv(OUTPUT / "table4_four_interval.csv", index=False)
-    table5.to_csv(OUTPUT / "table5_process_comparison.csv", index=False)
+    table_b6.to_csv(OUTPUT / "tableB6_four_interval.csv", index=False)
+    table_b8.to_csv(OUTPUT / "tableB8_process_comparison.csv", index=False)
     all_rows.to_csv(OUTPUT / "section5_llm_tables.csv", index=False)
-    return primary_frame, table2, table4, table5
+    return primary_frame, table2, table_b6, table_b8
 
 
 def build_schedule_figures() -> None:
     FIGURES.mkdir(parents=True, exist_ok=True)
     designs = (
         (
-            "figure8_two_interval_schedule.png",
+            "figure9_two_interval_schedule.png",
             "Two-interval null-alternative sequence",
             ((51, 250), (301, 500)),
         ),
         (
-            "figure12_four_interval_schedule.png",
+            "figureB17_four_interval_schedule.png",
             "Four-interval null-alternative sequence",
             ((51, 100), (126, 175), (201, 250), (276, 325)),
         ),
@@ -355,7 +355,7 @@ def build_trajectory_figures(primary_frame: pd.DataFrame) -> None:
     )
     fig.tight_layout(rect=(0, 0.10, 1, 0.96))
     fig.savefig(
-        FIGURES / "figure9_representative_two_interval_trajectories.png",
+        FIGURES / "figure10_representative_two_interval_trajectories.png",
         dpi=300,
         facecolor="white",
     )
@@ -375,7 +375,7 @@ def build_trajectory_figures(primary_frame: pd.DataFrame) -> None:
     )
     fig.tight_layout(rect=(0, 0.16, 1, 0.93))
     fig.savefig(
-        FIGURES / "figure13_representative_four_interval_trajectory.png",
+        FIGURES / "figureB18_representative_four_interval_trajectory.png",
         dpi=300,
         facecolor="white",
     )
@@ -386,13 +386,13 @@ def build_trajectory_figures(primary_frame: pd.DataFrame) -> None:
     )
 
 
-def build_tradeoff_figure(table5: pd.DataFrame) -> None:
-    labels = method_order(table5)
+def build_tradeoff_figure(table_b8: pd.DataFrame) -> None:
+    labels = method_order(table_b8)
     palette = plt.get_cmap("tab10").colors[: len(labels)]
     colors = dict(zip(labels, palette, strict=True))
     fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2))
     for axis, temperature in zip(axes, (0.75, 1.0), strict=True):
-        block = table5[np.isclose(table5["temperature"], temperature)].set_index(
+        block = table_b8[np.isclose(table_b8["temperature"], temperature)].set_index(
             "method_label"
         )
         for label in labels:
@@ -421,7 +421,7 @@ def build_tradeoff_figure(table5: pd.DataFrame) -> None:
         fontsize=9,
     )
     fig.tight_layout(rect=(0, 0.16, 1, 1))
-    fig.savefig(FIGURES / "figure14_power_coverage_fdp.png", dpi=300, facecolor="white")
+    fig.savefig(FIGURES / "figureB20_power_coverage_fdp.png", dpi=300, facecolor="white")
     plt.close(fig)
 
 
@@ -612,7 +612,7 @@ def build_human_watermark_figure() -> None:
     fig.subplots_adjust(left=0.105, right=0.985, top=0.93, bottom=0.15)
     for suffix in ("png", "pdf"):
         fig.savefig(
-            FIGURES / f"human_watermark_refreshing_process.{suffix}",
+            FIGURES / f"figure12_human_watermark_refreshing_process.{suffix}",
             dpi=300,
             facecolor="white",
         )
@@ -620,10 +620,10 @@ def build_human_watermark_figure() -> None:
 
 
 def main() -> int:
-    primary_frame, _, _, table5 = build_tables()
+    primary_frame, _, _, table_b8 = build_tables()
     build_schedule_figures()
     build_trajectory_figures(primary_frame)
-    build_tradeoff_figure(table5)
+    build_tradeoff_figure(table_b8)
     build_human_watermark_figure()
     print(f"Section 5.2 outputs written to {OUTPUT}")
     return 0

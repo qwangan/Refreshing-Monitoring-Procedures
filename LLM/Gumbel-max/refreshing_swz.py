@@ -371,7 +371,7 @@ def online_grenander_e_factors(pivot_y: Iterable[float]) -> np.ndarray:
     The factor at time ``t`` is fitted strictly from pivots before ``t``.
     This reference implementation favors transparency and mathematical audit:
     it refits the weighted Grenander estimator at each token.  Horizon 600 is
-    small enough for smoke tests; a full 4,700-path replay should benchmark or
+    small enough for smoke tests; a full 1,400-path replay should benchmark or
     optimize this routine before launch.
     """
 

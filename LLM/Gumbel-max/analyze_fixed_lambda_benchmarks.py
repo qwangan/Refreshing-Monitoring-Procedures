@@ -2,7 +2,7 @@
 """Replay prespecified fixed-lambda SWZ processes on frozen experiment paths.
 
 This analysis never loads OPT-1.3B and never regenerates text. It reuses the
-saved 4,700-path two-temperature design.
+1,000 primary paths from the saved 1,400-path two-temperature design.
 
 For a prespecified lambda, the nonadaptive multiplier is
 
@@ -133,7 +133,7 @@ def run_opt(
     profile = str(design.get("profile"))
     if profile == "study":
         scenarios = generation.study_scenarios()
-        expected_paths = 4_700
+        expected_paths = generation.TOTAL_MODEL_PATHS
     else:
         raise RuntimeError(f"unsupported saved-path profile: {profile}")
     specs = generation.build_manifest(scenarios, batch_size=generation.DEFAULT_BATCH_SIZE)
@@ -150,6 +150,9 @@ def run_opt(
         raise RuntimeError(
             f"expected {expected_paths:,} saved OPT paths, found {len(specs)}"
         )
+    specs = [spec for spec in specs if spec.schedule_id == "two_l200_g050"]
+    if len(specs) != 1_000:
+        raise RuntimeError("fixed-lambda comparison requires 1,000 primary paths")
     if smoke_per_scenario is not None:
         by_scenario: dict[str, list] = defaultdict(list)
         for spec in specs:

@@ -355,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     profile = str(design.get("profile"))
     if profile == "study":
         scenarios = generation.study_scenarios()
-        expected_paths = 4_700
+        expected_paths = generation.TOTAL_MODEL_PATHS
     else:
         raise RuntimeError(f"unsupported saved-path profile: {profile}")
     specs = generation.build_manifest(scenarios, batch_size=generation.DEFAULT_BATCH_SIZE)
@@ -370,6 +370,10 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("saved input design hash does not match the frozen generator")
     if len(specs) != expected_paths:
         raise RuntimeError(f"expected the complete {expected_paths:,}-path manifest")
+
+    specs = [spec for spec in specs if spec.schedule_id == "two_l200_g050"]
+    if len(specs) != 1_000:
+        raise RuntimeError("process comparison requires 1,000 primary paths")
 
     if args.smoke_paths_per_temperature is not None:
         selected = []

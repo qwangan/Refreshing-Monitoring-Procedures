@@ -7,7 +7,9 @@
 
 args_all <- commandArgs(trailingOnly = FALSE)
 script_arg <- args_all[grepl("^--file=", args_all)]
-root <- dirname(normalizePath(sub("^--file=", "", script_arg[[1]])))
+script_path <- sub("^--file=", "", script_arg[[1]])
+script_path <- gsub("~\\+~", " ", script_path)
+root <- dirname(normalizePath(script_path))
 args <- commandArgs(trailingOnly = TRUE)
 detected_cores <- parallel::detectCores()
 default_cores <- if (is.na(detected_cores)) 1L else max(1L, detected_cores - 1L)
@@ -296,7 +298,7 @@ rownames(var_matrix) <- rownames(es_matrix) <- model_names
 figure_return_index <- which(return_dates == figure_start)
 monitoring_return_index <- which(return_dates == monitoring_start)
 if (length(figure_return_index) != 1L || length(monitoring_return_index) != 1L) {
-  stop("Required Figure 10 or monitoring start date is absent")
+  stop("Required Figure 14 or monitoring start date is absent")
 }
 figure_forecast_index <- figure_return_index - rolling_window
 history_return_index <- monitoring_return_index - rolling_window
@@ -329,7 +331,7 @@ bundle <- list(
       sgt_version = as.character(utils::packageVersion("sgt"))
     )
   ),
-  figure10 = data.frame(
+  figure14 = data.frame(
     date = format(return_dates[figure_return_index:length(losses)]),
     negated_percentage_log_return = losses[figure_return_index:length(losses)],
     ES_0975_normal = es_matrix["normal", figure_columns],
@@ -344,7 +346,7 @@ bundle <- list(
   )
 )
 
-if (length(bundle$figure10$date) != 6539L ||
+if (length(bundle$figure14$date) != 6539L ||
     length(bundle$backtest$dates) != 5282L ||
     length(bundle$backtest$y) != 5782L ||
     ncol(bundle$backtest$ESout2) != 5782L ||
@@ -355,7 +357,7 @@ if (length(bundle$figure10$date) != 6539L ||
 save_rds_atomic(bundle, output_file)
 message("Saved regenerated forecast bundle to ", normalizePath(output_file))
 message(
-  "Figure 10 dates: ", min(as.Date(bundle$figure10$date)), " through ",
-  max(as.Date(bundle$figure10$date)), "; refreshing backtest dates: ",
+  "Figure 14 dates: ", min(as.Date(bundle$figure14$date)), " through ",
+  max(as.Date(bundle$figure14$date)), "; refreshing backtest dates: ",
   min(bundle$backtest$dates), " through ", max(bundle$backtest$dates)
 )

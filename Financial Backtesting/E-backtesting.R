@@ -2,7 +2,9 @@
 
 args <- commandArgs(trailingOnly = FALSE)
 script_arg <- args[grepl("^--file=", args)]
-root <- dirname(normalizePath(sub("^--file=", "", script_arg[[1]])))
+script_path <- sub("^--file=", "", script_arg[[1]])
+script_path <- gsub("~\\+~", " ", script_path)
+root <- dirname(normalizePath(script_path))
 out_dir <- file.path(root, "results")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -15,24 +17,24 @@ input_file <- if (length(input_argument)) {
 }
 input <- readRDS(normalizePath(input_file, mustWork = TRUE))
 backtest <- input$backtest
-figure10 <- input$figure10
+figure14 <- if (!is.null(input$figure14)) input$figure14 else input$figure10
 
-## Figure 10: negated percentage log-returns and ES forecasts, 2000-2025.
-plot_dates <- as.Date(figure10$date)
+## Figure 14: negated percentage log-returns and ES forecasts, 2000-2025.
+plot_dates <- as.Date(figure14$date)
 forecast_colors <- c("orange", "green3", "dodgerblue2", "#E84A5F")
 event_dates <- as.Date(c("2008-09-15", "2020-03-11"))
 
-pdf(file.path(out_dir, "Figure10.pdf"), width = 11, height = 5.2)
+pdf(file.path(out_dir, "Figure14.pdf"), width = 11, height = 5.2)
 layout(matrix(1:2, nrow = 1))
 par(mar = c(4.5, 4.7, 1, 0.8))
-plot(plot_dates, figure10$negated_percentage_log_return, type = "l",
+plot(plot_dates, figure14$negated_percentage_log_return, type = "l",
      xlab = "dates", ylab = "negated percentage log returns", lwd = 0.55)
 abline(v = event_dates, lty = 3, col = "gray35")
 es_forecasts <- rbind(
-  figure10$ES_0975_normal,
-  figure10$ES_0975_t,
-  figure10$ES_0975_skewed_t,
-  figure10$ES_0975_empirical
+  figure14$ES_0975_normal,
+  figure14$ES_0975_t,
+  figure14$ES_0975_skewed_t,
+  figure14$ES_0975_empirical
 )
 plot(plot_dates, es_forecasts[1, ], type = "n", xlab = "dates",
      ylab = expression(ES[0.975] ~ forecast), ylim = range(es_forecasts))
@@ -138,7 +140,7 @@ localized_blocks <- function(path) {
   do.call(rbind, answer)
 }
 
-table3 <- do.call(rbind, lapply(seq_along(labels), function(i) {
+localized_rejection_blocks <- do.call(rbind, lapply(seq_along(labels), function(i) {
   blocks <- localized_blocks(refreshed[i, ])
   if (!nrow(blocks)) return(NULL)
   data.frame(
@@ -148,7 +150,11 @@ table3 <- do.call(rbind, lapply(seq_along(labels), function(i) {
     rejection_date = dates[blocks$end]
   )
 }))
-write.csv(table3, file.path(out_dir, "Table3.csv"), row.names = FALSE)
+write.csv(
+  localized_rejection_blocks,
+  file.path(out_dir, "localized_rejection_blocks.csv"),
+  row.names = FALSE
+)
 
 ## Figure 15: original GREM process and four refreshing processes.
 ylim <- backtest$e_lim
@@ -187,4 +193,4 @@ for (i in 1:4) {
 }
 dev.off()
 
-print(table3)
+print(localized_rejection_blocks)
