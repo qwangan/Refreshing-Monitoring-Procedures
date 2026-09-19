@@ -1,7 +1,7 @@
 results/
-LLM/study_paths/
-LLM/.hf-cache-opt13b/
-LLM/.mplconfig/
+LLM/Gumbel-max/study_paths/
+LLM/Gumbel-max/.hf-cache-opt13b/
+LLM/Gumbel-max/.mplconfig/
 NASDAQ-forecast-checkpoints/
 NASDAQ-regenerated.rds
 __pycache__/

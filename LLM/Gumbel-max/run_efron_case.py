@@ -62,7 +62,7 @@ from efron_contract import (
 )
 from refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
 DEFAULT_SOURCE = ROOT / "efron_excerpt.txt"
-DEFAULT_OUTPUT = ROOT.parent / "results" / "llm" / "efron_case"
+DEFAULT_OUTPUT = ROOT.parents[1] / "results" / "llm" / "efron_case"
 TORCH_THREADS = 8
 MPL_CACHE = Path(os.environ.get("EFRON_MPLCONFIGDIR", "/tmp/efron_opt13b_matplotlib"))
 MPL_CACHE.mkdir(parents=True, exist_ok=True)

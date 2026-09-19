@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$ROOT/.." && pwd)"
+REPO_ROOT="$(cd "$ROOT/../.." && pwd)"
 PATHS="$ROOT/study_paths"
 RESULTS="$REPO_ROOT/results/llm"
 

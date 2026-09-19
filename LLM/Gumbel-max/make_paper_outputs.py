@@ -22,7 +22,7 @@ from refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
 
 
 ROOT = Path(__file__).resolve().parent
-REPO_ROOT = ROOT.parent
+REPO_ROOT = ROOT.parents[1]
 RESULTS = REPO_ROOT / "results" / "llm"
 PRIMARY = RESULTS / "primary" / "path_metrics.csv"
 PROCESSES = RESULTS / "processes" / "path_metrics.csv"

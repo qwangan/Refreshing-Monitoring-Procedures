@@ -10,9 +10,16 @@ Code and data for the numerical studies in "False discovery rates for refreshing
 Rscript IID.R
 ```
 
-## LLM watermark experiment
+## LLM watermark experiments
 
-The `LLM` directory contains the complete OPT-1.3B generation and analysis code for Section 5.2 and Appendix B:
+The `LLM` directory is organized by watermarking method:
+
+* `LLM/Gumbel-max` contains the complete Gumbel-max OPT-1.3B study for Section 5.2 and Appendix B.
+* `LLM/Tournament` contains the Tournament-watermark mixed-text experiment.
+
+### Gumbel-max watermark
+
+The `LLM/Gumbel-max` directory contains:
 
 * `generate_fresh_opt13b.py` fixes the prompts, schedules, seeds, model revision, and generates all model paths.
 * `refreshing_swz.py` implements the refreshing and localization procedures.
@@ -20,19 +27,19 @@ The `LLM` directory contains the complete OPT-1.3B generation and analysis code 
 * `make_paper_outputs.py` generates the reported tables and representative figures.
 * `run_gpu_study.sh` runs the full resumable study on a CUDA GPU.
 
-Install the packages in `LLM/requirements.txt`, then run:
+Install the packages in `LLM/Gumbel-max/requirements.txt`, then run:
 
 ```sh
-bash LLM/run_gpu_study.sh
+bash LLM/Gumbel-max/run_gpu_study.sh
 ```
 
-The mixed Efron/OPT-1.3B text example uses four fixed paragraphs from printed page x of Efron's *Large-Scale Inference*. `LLM/prepare_efron_source.py` reproduces the excerpt from the source PDF, and `LLM/run_efron_case.py` regenerates the prespecified GPU realization. The supplied `LLM/human_watermark.npz` is the coauthor's exact saved realization used for the paper figure.
+The mixed Efron/OPT-1.3B text example uses four fixed paragraphs from printed page x of Efron's *Large-Scale Inference*. `LLM/Gumbel-max/prepare_efron_source.py` reproduces the excerpt from the source PDF, and `LLM/Gumbel-max/run_efron_case.py` regenerates the prespecified GPU realization. The supplied `LLM/Gumbel-max/human_watermark.npz` is the coauthor's exact saved realization used for the paper figure.
 
 ```sh
-cd LLM
+cd LLM/Gumbel-max
 python prepare_efron_source.py --pdf BradleyEfron_2010_Prologue_Large-ScaleInferenceE.pdf
 python run_efron_case.py --device cuda
-HUMAN_WATERMARK_NPZ=../results/llm/efron_case/case_arrays.npz \
+HUMAN_WATERMARK_NPZ=../../results/llm/efron_case/case_arrays.npz \
   python -c "import make_paper_outputs as p; p.build_human_watermark_figure()"
 ```
 
