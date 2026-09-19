@@ -45,16 +45,18 @@ HUMAN_WATERMARK_NPZ=../../results/llm/efron_case/case_arrays.npz \
 
 ### Tournament watermark
 
-`LLM/Tournament` contains the coauthor's locked, code-only reproduction of the Tournament-watermark mixed-text experiment. It uses the same Efron source passage and a prespecified H-W-H-W-H realization, with two 100-token Tournament-watermarked OPT-1.3B continuations between three 81-token human blocks. The directory includes the design lock, source materials, detector implementation, tests, and code for regenerating the reported metrics and figures; generated results are intentionally excluded.
+`LLM/Tournament` contains the coauthor's code for the Tournament-watermark mixed-text experiment. It uses the same Efron source passage and a prespecified H-W-H-W-H realization, with two 100-token Tournament-watermarked OPT-1.3B continuations between three 81-token human blocks.
+
+The folder follows the same compact layout as `LLM/Gumbel-max`: `run_efron_case.py` runs the experiment, `tournament_watermark.py` implements the watermark and randomized pivot, `refreshing_swz.py` implements the refreshing detector, `efron_contract.py` records the locked design, and `efron_excerpt.txt` is the hash-checked input text.
 
 ```sh
 cd LLM/Tournament
-python -m pytest -q
+python -m pip install -r requirements.txt
 python run_efron_case.py --smoke --device auto
 python run_efron_case.py --device cuda
 ```
 
-See `LLM/Tournament/README.md` for the pinned model revision, watermark construction, seed, and commands for rebuilding figures from saved pivots.
+Generated outputs are written to `results/llm/tournament_efron_case/` and are intentionally excluded from the repository. Figures can be rebuilt from saved pivots without regenerating text using `python run_efron_case.py --rebuild-derived --local-files-only`.
 
 ## Financial backtesting
 

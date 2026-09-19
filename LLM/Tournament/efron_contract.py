@@ -60,14 +60,11 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def validate_source(source_path: Path | None = None, pdf_path: Path | None = None) -> str:
-    source_path = source_path or ROOT / "source" / "efron_four_paragraphs.txt"
-    pdf_path = pdf_path or ROOT / "source" / "BradleyEfron_2010_Prologue.pdf"
+def validate_source(source_path: Path | None = None) -> str:
+    source_path = source_path or ROOT / "efron_excerpt.txt"
     text = source_path.read_text(encoding="utf-8")
     if sha256_text(text) != SOURCE_EXCERPT_SHA256:
         raise RuntimeError("normalized Efron passage hash changed")
     if len(text.split()) != SOURCE_WORDS:
         raise RuntimeError("normalized Efron word count changed")
-    if hashlib.sha256(pdf_path.read_bytes()).hexdigest() != SOURCE_PDF_SHA256:
-        raise RuntimeError("Efron source PDF hash changed")
     return text

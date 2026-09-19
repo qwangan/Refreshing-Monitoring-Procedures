@@ -58,13 +58,12 @@ from efron_contract import (
     WATERMARK_BLOCK_TOKENS,
     validate_source,
 )
-from dev_detector.refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
+from refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
 from tournament_watermark import binomial_randomized_pit, stable_calibrator
 
 
-DEFAULT_SOURCE = ROOT / "source" / "efron_four_paragraphs.txt"
-DEFAULT_SOURCE_PDF = ROOT / "source" / "BradleyEfron_2010_Prologue.pdf"
-DEFAULT_OUTPUT = ROOT / "results" / "efron_case"
+DEFAULT_SOURCE = ROOT / "efron_excerpt.txt"
+DEFAULT_OUTPUT = ROOT.parents[1] / "results" / "llm" / "tournament_efron_case"
 TORCH_THREADS = 8
 MPL_CACHE = Path(os.environ.get("TOURNAMENT_MPLCONFIGDIR", "/tmp/tournament_opt13b_matplotlib"))
 MPL_CACHE.mkdir(parents=True, exist_ok=True)
@@ -115,7 +114,7 @@ def write_npz_atomic(path: Path, arrays: dict[str, np.ndarray]) -> None:
 
 def load_frozen_source(path: Path = DEFAULT_SOURCE) -> str:
     if path.resolve() == DEFAULT_SOURCE.resolve():
-        return validate_source(path, DEFAULT_SOURCE_PDF)
+        return validate_source(path)
     text = path.read_text(encoding="utf-8")
     if sha256_text(text) != SOURCE_EXCERPT_SHA256:
         raise RuntimeError("source excerpt is not the frozen Efron text")
@@ -1046,7 +1045,6 @@ def run_smoke(tokenizer, model, torch, source_text: str) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
-    parser.add_argument("--source-pdf", type=Path, default=DEFAULT_SOURCE_PDF)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
     parser.add_argument("--local-files-only", action="store_true")
@@ -1054,7 +1052,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--rebuild-derived", action="store_true", help="replay saved pivots and rebuild only the box")
     args = parser.parse_args(argv)
 
-    validate_source(args.source, args.source_pdf)
+    validate_source(args.source)
     source_text = load_frozen_source(args.source)
 
     if args.rebuild_derived:
