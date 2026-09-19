@@ -36,6 +36,19 @@ HUMAN_WATERMARK_NPZ=../results/llm/efron_case/case_arrays.npz \
   python -c "import make_paper_outputs as p; p.build_human_watermark_figure()"
 ```
 
+### Tournament watermark
+
+`LLM/Tournament` contains the coauthor's locked, code-only reproduction of the Tournament-watermark mixed-text experiment. It uses the same Efron source passage and a prespecified H-W-H-W-H realization, with two 100-token Tournament-watermarked OPT-1.3B continuations between three 81-token human blocks. The directory includes the design lock, source materials, detector implementation, tests, and code for regenerating the reported metrics and figures; generated results are intentionally excluded.
+
+```sh
+cd LLM/Tournament
+python -m pytest -q
+python run_efron_case.py --smoke --device auto
+python run_efron_case.py --device cuda
+```
+
+See `LLM/Tournament/README.md` for the pinned model revision, watermark construction, seed, and commands for rebuilding figures from saved pivots.
+
 ## Financial backtesting
 
 The `Financial Backtesting` directory contains the complete data and code for Section 5.3. `NASDAQ.csv` contains the daily closing values of the NASDAQ Composite index (`^IXIC`) from January 16, 1996 through December 31, 2025. `NASDAQ-forecasts.R` contains all functions needed to construct the negated percentage log-returns and the rolling 97.5% VaR and ES forecasts under normal, t, skewed-t, and empirical specifications. No code from the earlier E-backtesting repository is required.
