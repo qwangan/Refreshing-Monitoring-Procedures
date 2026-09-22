@@ -149,7 +149,7 @@ def contract_payload() -> dict[str, object]:
             "threshold_exact": THRESHOLD_EXACT,
             "threshold_display": THRESHOLD_DISPLAY,
             "threshold_rule": "exact gamma 49; conservative integer ceiling for the general 10% bound",
-            "localizer": "refreshing plus last global minimum",
+            "localizer": "resetting plus last global minimum",
             "source_sha256": DETECTOR_SOURCE_SHA256,
         },
         "figure": {
@@ -166,18 +166,18 @@ def contract_payload() -> dict[str, object]:
 
 
 def validate_static_contract() -> dict[str, object]:
-    import refreshing_swz
+    import resetting_swz
 
     expected_lock = contract_payload()
-    detector_path = ROOT / "refreshing_swz.py"
+    detector_path = ROOT / "resetting_swz.py"
     observed_hash = sha256_file(detector_path)
     if observed_hash != DETECTOR_SOURCE_SHA256:
         raise RuntimeError(
             f"certified detector hash mismatch: {observed_hash} != {DETECTOR_SOURCE_SHA256}"
         )
-    if refreshing_swz.DEFAULT_SWZ_CAP != SWZ_CAP:
+    if resetting_swz.DEFAULT_SWZ_CAP != SWZ_CAP:
         raise RuntimeError("weighted-adaptive cap changed")
-    calibrated = 1.0 / refreshing_swz.alpha_for_general_fdr_target(0.10)
+    calibrated = 1.0 / resetting_swz.alpha_for_general_fdr_target(0.10)
     if THRESHOLD_EXACT != THRESHOLD_DISPLAY or THRESHOLD_EXACT != 49:
         raise RuntimeError("the case must use exact gamma=49")
     if math.ceil(calibrated) != THRESHOLD_EXACT:

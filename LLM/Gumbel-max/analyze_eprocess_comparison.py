@@ -31,15 +31,15 @@ sys.path.insert(0, str(DETECTOR_DIR))
 
 import analyze_opt13b_paths as base  # noqa: E402
 import generate_fresh_opt13b as generation  # noqa: E402
-from refreshing_swz import (  # noqa: E402
+from resetting_swz import (  # noqa: E402
     alpha_for_general_fdr_target,
     annotate_reports,
     general_dependence_bound,
     path_metrics,
     run_average_from_component_evalues,
     run_online_grenander_from_pivots,
-    run_refreshing_from_evalues,
-    run_refreshing_from_pivots,
+    run_resetting_from_evalues,
+    run_resetting_from_pivots,
 )
 
 
@@ -53,17 +53,17 @@ def process_configuration(target: float):
         f"wa_one_shot_{calibration}",
         f"og_one_shot_{calibration}",
         f"average_one_shot_{calibration}",
-        f"wa_refresh_{calibration}",
-        f"og_refresh_{calibration}",
-        f"average_refresh_{calibration}",
+        f"wa_reset_{calibration}",
+        f"og_reset_{calibration}",
+        f"average_reset_{calibration}",
     )
     meta = {
         f"wa_one_shot_{calibration}": ("weight_adaptive", "one_shot", calibration),
         f"og_one_shot_{calibration}": ("online_grenander", "one_shot", calibration),
         f"average_one_shot_{calibration}": ("average_50_50", "one_shot", calibration),
-        f"wa_refresh_{calibration}": ("weight_adaptive", "refresh", calibration),
-        f"og_refresh_{calibration}": ("online_grenander", "refresh", calibration),
-        f"average_refresh_{calibration}": ("average_50_50", "refresh", calibration),
+        f"wa_reset_{calibration}": ("weight_adaptive", "reset", calibration),
+        f"og_reset_{calibration}": ("online_grenander", "reset", calibration),
+        f"average_reset_{calibration}": ("average_50_50", "reset", calibration),
     }
     labels = {
         method: f"{process.replace('_', ' ')}; {mode.replace('_', ' ')}; {threshold}"
@@ -73,12 +73,12 @@ def process_configuration(target: float):
         (f"og_one_shot_{calibration}", f"wa_one_shot_{calibration}"),
         (f"average_one_shot_{calibration}", f"wa_one_shot_{calibration}"),
         (f"average_one_shot_{calibration}", f"og_one_shot_{calibration}"),
-        (f"og_refresh_{calibration}", f"wa_refresh_{calibration}"),
-        (f"average_refresh_{calibration}", f"wa_refresh_{calibration}"),
-        (f"average_refresh_{calibration}", f"og_refresh_{calibration}"),
-        (f"wa_refresh_{calibration}", f"wa_one_shot_{calibration}"),
-        (f"og_refresh_{calibration}", f"og_one_shot_{calibration}"),
-        (f"average_refresh_{calibration}", f"average_one_shot_{calibration}"),
+        (f"og_reset_{calibration}", f"wa_reset_{calibration}"),
+        (f"average_reset_{calibration}", f"wa_reset_{calibration}"),
+        (f"average_reset_{calibration}", f"og_reset_{calibration}"),
+        (f"wa_reset_{calibration}", f"wa_one_shot_{calibration}"),
+        (f"og_reset_{calibration}", f"og_one_shot_{calibration}"),
+        (f"average_reset_{calibration}", f"average_one_shot_{calibration}"),
     )
     return order, meta, labels, pairs, calibration
 
@@ -151,7 +151,7 @@ def replay_methods(
     general_calibration: str = DEFAULT_GENERAL_CALIBRATION,
 ):
     started = time.perf_counter()
-    wa_base = run_refreshing_from_pivots(
+    wa_base = run_resetting_from_pivots(
         pivots,
         strategy="adaptive_cumulative",
         threshold=NO_CROSSING_THRESHOLD,
@@ -167,10 +167,10 @@ def replay_methods(
     )
     og_seconds = time.perf_counter() - started
 
-    wa_general = run_refreshing_from_evalues(
+    wa_general = run_resetting_from_evalues(
         wa_base.e_factor, threshold=general_threshold
     )
-    og_general = run_refreshing_from_evalues(
+    og_general = run_resetting_from_evalues(
         og_base.e_factor, threshold=general_threshold
     )
     avg_general = run_average_from_component_evalues(
@@ -180,9 +180,9 @@ def replay_methods(
     wa_one_shot_name = f"wa_one_shot_{general_calibration}"
     og_one_shot_name = f"og_one_shot_{general_calibration}"
     average_one_shot_name = f"average_one_shot_{general_calibration}"
-    wa_general_name = f"wa_refresh_{general_calibration}"
-    og_general_name = f"og_refresh_{general_calibration}"
-    average_general_name = f"average_refresh_{general_calibration}"
+    wa_general_name = f"wa_reset_{general_calibration}"
+    og_general_name = f"og_reset_{general_calibration}"
+    average_general_name = f"average_reset_{general_calibration}"
     reports = {
         wa_one_shot_name: _first_report(wa_general),
         og_one_shot_name: _first_report(og_general),
@@ -421,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
         "adaptive_cap": ADAPTIVE_CAP,
         "source_sha256": {
             "analysis": base.sha256_file(Path(__file__).resolve()),
-            "detector": base.sha256_file(DETECTOR_DIR / "refreshing_swz.py"),
+            "detector": base.sha256_file(DETECTOR_DIR / "resetting_swz.py"),
             "generator": base.sha256_file(GENERATION_DIR / "generate_fresh_opt13b.py"),
         },
         "notes": [

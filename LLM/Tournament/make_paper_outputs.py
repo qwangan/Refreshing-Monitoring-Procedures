@@ -104,7 +104,7 @@ def draw_trajectory(
         axis.hlines(-3.72, start, end, color=TEAL, linewidth=3.5)
     axis.set_xlim(0, wealth.size)
     axis.set_ylim(-4.15, max(math.log(THRESHOLD) + 1.0, float(np.nanmax(wealth)) + 0.4))
-    axis.set_ylabel("log refreshing process", fontsize=13)
+    axis.set_ylabel("log resetting process", fontsize=13)
     axis.set_title(title, loc="left", fontsize=13, fontweight="bold", pad=8)
     axis.tick_params(axis="both", labelsize=11, width=0.8, length=4)
     axis.grid(axis="y", color=GRID, linewidth=0.6, alpha=0.8)
@@ -115,7 +115,7 @@ def draw_trajectory(
 
 def trajectory_legend() -> list[object]:
     return [
-        Line2D([0], [0], color=NAVY, lw=1.7, label="log refreshing process"),
+        Line2D([0], [0], color=NAVY, lw=1.7, label="log resetting process"),
         Line2D(
             [0],
             [0],
@@ -156,7 +156,7 @@ def build_representative_trajectories() -> None:
         draw_trajectory(axis, trace, label, two_regions)
     axes[-1].set_xlabel("Token position", fontsize=13)
     fig.suptitle(
-        "Representative refreshing trajectories",
+        "Representative resetting trajectories",
         color=NAVY,
         fontsize=17,
         fontweight="bold",
@@ -186,7 +186,7 @@ def build_representative_trajectories() -> None:
     )
     axis.set_xlabel("Token position", fontsize=13)
     fig.suptitle(
-        "Representative refreshing trajectory: four-interval setting",
+        "Representative resetting trajectory: four-interval setting",
         color=NAVY,
         fontsize=17,
         fontweight="bold",

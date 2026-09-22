@@ -68,7 +68,7 @@ from efron_contract import (
     sha256_file,
     validate_static_contract,
 )
-from refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
+from resetting_swz import Region, path_metrics, run_resetting_from_pivots
 DEFAULT_SOURCE = ROOT / "efron_excerpt.txt"
 DEFAULT_OUTPUT = ROOT.parents[1] / "results" / "llm" / "efron_case"
 TORCH_THREADS = 8
@@ -751,7 +751,7 @@ def contiguous_intervals(mask: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(starts.tolist(), ends.tolist(), strict=True))
 
 
-def render_refreshing_process(
+def render_resetting_process(
     output_pdf: Path,
     output_png: Path,
     arrays: dict[str, np.ndarray],
@@ -766,7 +766,7 @@ def render_refreshing_process(
 
     pivots = np.asarray(arrays["pivot_y"], dtype=float)
     truth = np.asarray(arrays["is_watermarked"], dtype=bool)
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         pivots,
         strategy=DETECTOR_STRATEGY,
         threshold=THRESHOLD_EXACT,
@@ -774,7 +774,7 @@ def render_refreshing_process(
     )
     selected = report_union_mask(detector.reports, pivots.size)
     if not np.array_equal(selected, arrays["selected_by_any_report"]):
-        raise RuntimeError("refreshing-process replay differs from saved selection")
+        raise RuntimeError("resetting-process replay differs from saved selection")
 
     human_color = "#D7DEE2"
     watermark_color = "#F4DDAF"
@@ -888,7 +888,7 @@ def render_refreshing_process(
         lower - 0.15,
         max(float(candidate.max()), math.log(THRESHOLD_EXACT)) + 0.55,
     )
-    process_axis.set_ylabel("log refreshing process", fontsize=11)
+    process_axis.set_ylabel("log resetting process", fontsize=11)
     process_axis.set_xlabel("Token position", fontsize=11)
     process_axis.set_xlim(0.5, pivots.size + 0.5)
 
@@ -899,18 +899,18 @@ def render_refreshing_process(
         axis.tick_params(labelsize=10, colors=ink)
 
     fig.suptitle(
-        "Refreshing process for mixed Efron and watermarked text",
+        "Resetting process for mixed Efron and watermarked text",
         fontsize=15,
         color=ink,
         y=0.99,
     )
     fig.legend(
         handles=[
-            Line2D([], [], color=curve_color, linewidth=1.8, label="log refreshing process"),
+            Line2D([], [], color=curve_color, linewidth=1.8, label="log resetting process"),
             Line2D([], [], color=alarm_color, linestyle="--", linewidth=1.6,
                    label=r"threshold $\log(49)$"),
             Line2D([], [], marker="o", linestyle="none", color=alarm_color,
-                   markersize=6, label="alarm and refresh"),
+                   markersize=6, label="alarm and reset"),
             Line2D([], [], color=report_color, linewidth=3.2, label="localized report"),
             Patch(facecolor=watermark_color, label="watermarked OPT-1.3B block"),
             Patch(facecolor=human_color, label="fixed Efron block"),
@@ -994,8 +994,8 @@ def build_derived_artifacts(
     pdf_path = output_dir / "efron_case_box.pdf"
     png_path = output_dir / "efron_case_box.png"
     tex_path = output_dir / "efron_case_box.tex"
-    process_pdf_path = output_dir / "efron_refreshing_process.pdf"
-    process_png_path = output_dir / "efron_refreshing_process.png"
+    process_pdf_path = output_dir / "efron_resetting_process.pdf"
+    process_png_path = output_dir / "efron_resetting_process.png"
     mixed_text = tokenizer.decode(
         arrays["token_id"].astype(int).tolist(),
         skip_special_tokens=False,
@@ -1014,7 +1014,7 @@ def build_derived_artifacts(
         metrics,
     )
     write_text_atomic(tex_path, latex_figure_fragment(metrics, pdf_path.name))
-    render_refreshing_process(
+    render_resetting_process(
         process_pdf_path,
         process_png_path,
         arrays,
@@ -1042,10 +1042,10 @@ def build_derived_artifacts(
         "figure_png_sha256": sha256_file(png_path),
         "latex_fragment": tex_path.name,
         "latex_fragment_sha256": sha256_file(tex_path),
-        "refreshing_process_pdf": process_pdf_path.name,
-        "refreshing_process_pdf_sha256": sha256_file(process_pdf_path),
-        "refreshing_process_png": process_png_path.name,
-        "refreshing_process_png_sha256": sha256_file(process_png_path),
+        "resetting_process_pdf": process_pdf_path.name,
+        "resetting_process_pdf_sha256": sha256_file(process_pdf_path),
+        "resetting_process_png": process_png_path.name,
+        "resetting_process_png_sha256": sha256_file(process_png_path),
         "blind_mixed_text": blind_path.name,
         "blind_mixed_text_sha256": sha256_file(blind_path),
         "metrics_csv": table_csv_path.name,
@@ -1065,7 +1065,7 @@ def replay_saved(tokenizer, output_dir: Path) -> int:
         raise RuntimeError("saved array hash mismatch")
     with np.load(arrays_path, allow_pickle=False) as archive:
         arrays = {name: np.asarray(archive[name]).copy() for name in archive.files}
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         arrays["pivot_y"],
         strategy=DETECTOR_STRATEGY,
         threshold=THRESHOLD_EXACT,
@@ -1142,7 +1142,7 @@ def run_smoke(tokenizer, model, torch, source_text: str) -> int:
     pivots = np.asarray(generated["pivot_y"])
     if pivots.shape != (13,) or not np.all((pivots > 0) & (pivots < 1)):
         raise RuntimeError("model smoke failed")
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         pivots,
         strategy=DETECTOR_STRATEGY,
         threshold=THRESHOLD_EXACT,
@@ -1208,7 +1208,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     generated = generate_mixed_document(tokenizer, model, torch, blocks)
     horizon = int(generated["horizon"])
     pivots = np.asarray(generated["pivot_y"], dtype=np.float64)
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         pivots,
         strategy=DETECTOR_STRATEGY,
         threshold=THRESHOLD_EXACT,
@@ -1285,7 +1285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "threshold_exact": THRESHOLD_EXACT,
         "threshold_display": THRESHOLD_DISPLAY,
         "eprocess": f"weighted adaptive e-process, cap {SWZ_CAP:g}",
-        "localizer": "refreshing plus last global minimum",
+        "localizer": "resetting plus last global minimum",
         "blocks": serialize_blocks(blocks),
         "alternative_intervals": [[region.start, region.end] for region in regions],
         "reports": [asdict(report) for report in detector.reports],

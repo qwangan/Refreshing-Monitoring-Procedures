@@ -1,6 +1,6 @@
-# Refreshing monitoring procedures
+# Sequential resetting procedures
 
-Code and frozen input data for the numerical studies in "False discovery rates for refreshing monitoring procedures" by Q. Wang, R. Wang, and Z. Zhang (2026). Generated tables, figures, reports, checkpoints, and model caches are intentionally excluded.
+Code and frozen input data for the numerical studies in "Sequential resetting procedures and false discovery rate" by Q. Wang, R. Wang, and Z. Zhang (2026). Generated tables, figures, reports, checkpoints, and model caches are intentionally excluded.
 
 ## Independent simulations
 
@@ -22,7 +22,7 @@ The `LLM` directory is organized by watermarking method:
 The `LLM/Gumbel-max` directory contains:
 
 * `generate_fresh_opt13b.py` fixes the prompts, schedules, seeds, model revision, and generates the 1,400 paths used in the paper: 1,000 primary paths and 400 four-interval stress paths.
-* `refreshing_swz.py` implements the refreshing and localization procedures.
+* `resetting_swz.py` implements the resetting and localization procedures.
 * `analyze_opt13b_paths.py` calculates Tables 2 and B.6.
 * `analyze_eprocess_comparison.py` and `analyze_fixed_lambda_benchmarks.py` calculate Table B.8.
 * `make_paper_outputs.py` generates Figures 9, 10, 12, B.17, B.18, and B.20 and the corresponding table files.
@@ -47,10 +47,10 @@ python -c "import make_paper_outputs as p; p.build_human_watermark_figure()"
 `LLM/Tournament` mirrors the Gumbel-max layout while retaining the Tournament-specific sampling and randomized pivot:
 
 * `generate_tournament_opt13b.py` generates the 1,400 primary and stress-study paths used in Tables 3, B.7, and B.9.
-* `analyze_tournament_paths.py` performs the refreshing-process replay and calculates those tables.
+* `analyze_tournament_paths.py` performs the resetting-process replay and calculates those tables.
 * `make_paper_outputs.py` generates Figures 11, 13, B.19, and B.21.
 * `run_efron_case.py` produces the balanced sentence-aligned mixed-document experiment in Table 5 and Figure 13 from the hash-checked `efron_excerpt.txt`, using the same source cuts and master seed as the Gumbel-max case.
-* `tournament_watermark.py` implements the 30-layer Tournament sampler and randomized null pivot, while `refreshing_swz.py` implements the refreshing detector.
+* `tournament_watermark.py` implements the 30-layer Tournament sampler and randomized null pivot, while `resetting_swz.py` implements the resetting detector.
 * `run_gpu_study.sh` runs the complete resumable Tournament study on a CUDA GPU.
 
 ```sh
@@ -85,6 +85,6 @@ cd "Financial Backtesting"
 Rscript E-backtesting.R
 ```
 
-Figure 14 contains 6,539 forecast dates from January 3, 2000 through December 31, 2025. The refreshing GREM analysis in Figure 15 contains 5,282 monitored dates from January 4, 2005 through December 31, 2025; the additional 500 preceding observations are used to initialize the betting rule.
+Figure 14 contains 6,539 forecast dates from January 3, 2000 through December 31, 2025. The resetting GREM analysis in Figure 15 contains 5,282 monitored dates from January 4, 2005 through December 31, 2025; the additional 500 preceding observations are used to initialize the betting rule.
 
 All generated tables and figures are written to `results/`.

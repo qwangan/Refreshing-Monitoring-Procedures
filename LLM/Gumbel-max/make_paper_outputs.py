@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 import analyze_opt13b_paths as primary
-from refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
+from resetting_swz import Region, path_metrics, run_resetting_from_pivots
 
 
 ROOT = Path(__file__).resolve().parent
@@ -39,22 +39,22 @@ HUMAN_WATERMARK_SHA256 = "8adcb110124d44bc0436d8380dab8dcc83302ccdf706ab9bf90612
 
 REPORT_LABELS = {
     "swz_one_shot_general_fdr10": "First alarm + global min.",
-    "swz_refresh_whole_block_general_fdr10": "Refresh + whole block",
-    "swz_refresh_local_general_fdr10": "Refresh + global min.",
-    "wa_refresh_general_fdr10": "WA",
-    "og_refresh_general_fdr10": "OG",
-    "average_refresh_general_fdr10": "50/50 average",
+    "swz_reset_whole_block_general_fdr10": "Reset + whole block",
+    "swz_reset_local_general_fdr10": "Reset + global min.",
+    "wa_reset_general_fdr10": "WA",
+    "og_reset_general_fdr10": "OG",
+    "average_reset_general_fdr10": "50/50 average",
 }
 
 MONITORING_METHODS = (
     "swz_one_shot_general_fdr10",
-    "swz_refresh_whole_block_general_fdr10",
-    "swz_refresh_local_general_fdr10",
+    "swz_reset_whole_block_general_fdr10",
+    "swz_reset_local_general_fdr10",
 )
 PROCESS_METHODS = (
-    "average_refresh_general_fdr10",
-    "og_refresh_general_fdr10",
-    "wa_refresh_general_fdr10",
+    "average_reset_general_fdr10",
+    "og_reset_general_fdr10",
+    "wa_reset_general_fdr10",
 )
 
 
@@ -187,7 +187,7 @@ def build_tables() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
     table_b6 = aggregate(
         primary_frame[
             (primary_frame["schedule_id"] == "four_l050_g025")
-            & (primary_frame["method"] == "swz_refresh_local_general_fdr10")
+            & (primary_frame["method"] == "swz_reset_local_general_fdr10")
         ]
     )
     table_b8 = pd.concat(
@@ -195,7 +195,7 @@ def build_tables() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
             aggregate(
                 process_frame[
                     (process_frame["schedule_id"] == "two_l200_g050")
-                    & (process_frame["monitoring_mode"] == "refresh")
+                    & (process_frame["monitoring_mode"] == "reset")
                     & process_frame["method"].isin(PROCESS_METHODS)
                 ]
             ),
@@ -207,9 +207,9 @@ def build_tables() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
     )
 
     wa_lambda = table2[
-        table2["method"] == "swz_refresh_local_general_fdr10"
+        table2["method"] == "swz_reset_local_general_fdr10"
     ].set_index("temperature")["mean_lambda"]
-    for method in ("wa_refresh_general_fdr10", "average_refresh_general_fdr10"):
+    for method in ("wa_reset_general_fdr10", "average_reset_general_fdr10"):
         mask = table_b8["method"] == method
         table_b8.loc[mask, "mean_lambda"] = table_b8.loc[mask, "temperature"].map(
             wa_lambda
@@ -264,7 +264,7 @@ def build_schedule_figures() -> None:
 
 def representative_rows(primary_frame: pd.DataFrame) -> list[dict]:
     local = primary_frame[
-        primary_frame["method"] == "swz_refresh_local_general_fdr10"
+        primary_frame["method"] == "swz_reset_local_general_fdr10"
     ]
     targets = (
         ("two_l200_g050", 0.75, "Two intervals, temperature 0.75"),
@@ -287,7 +287,7 @@ def draw_trajectory(axis: plt.Axes, selection: dict, spec_by_uid: dict) -> None:
     reports_by_method, traces = primary.replay_methods(
         pivots, THRESHOLD_EXACT, calibration
     )
-    method = "swz_refresh_local_general_fdr10"
+    method = "swz_reset_local_general_fdr10"
     reports = reports_by_method[method]
     wealth = np.maximum(np.asarray(traces[method].candidate_logwealth), -4.0)
     token = np.arange(1, pivots.size + 1)
@@ -308,7 +308,7 @@ def draw_trajectory(axis: plt.Axes, selection: dict, spec_by_uid: dict) -> None:
             linewidth=3.4,
         )
     axis.set_ylim(-4.15, max(math.log(THRESHOLD_EXACT) + 1, np.nanmax(wealth) + 0.4))
-    axis.set_ylabel("log refreshing process", fontsize=12)
+    axis.set_ylabel("log resetting process", fontsize=12)
     axis.set_title(
         f"{selection['label']}; localized reports={selection['reports']}",
         loc="left",
@@ -344,7 +344,7 @@ def build_trajectory_figures(primary_frame: pd.DataFrame) -> None:
     for axis, selection in zip(axes, selections[:2], strict=True):
         draw_trajectory(axis, selection, spec_by_uid)
     axes[-1].set_xlabel("Token position", fontsize=12)
-    fig.suptitle("Representative refreshing trajectories", fontsize=16)
+    fig.suptitle("Representative resetting trajectories", fontsize=16)
     fig.legend(
         handles=trajectory_legend(),
         ncol=5,
@@ -364,7 +364,7 @@ def build_trajectory_figures(primary_frame: pd.DataFrame) -> None:
     fig, axis = plt.subplots(figsize=(11, 4.2))
     draw_trajectory(axis, selections[2], spec_by_uid)
     axis.set_xlabel("Token position", fontsize=12)
-    fig.suptitle("Representative refreshing trajectory: four-interval setting", fontsize=16)
+    fig.suptitle("Representative resetting trajectory: four-interval setting", fontsize=16)
     fig.legend(
         handles=trajectory_legend(),
         ncol=5,
@@ -454,7 +454,7 @@ def build_human_watermark_figure() -> None:
     if pivots.size != 447 or not np.array_equal(truth, expected_truth):
         raise RuntimeError("human/watermark case design changed")
 
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         pivots,
         strategy="adaptive_cumulative",
         threshold=49.0,
@@ -576,7 +576,7 @@ def build_human_watermark_figure() -> None:
             zorder=4,
         )
     process_axis.set_ylim(lower - 0.15, max(float(candidate.max()), np.log(49.0)) + 0.55)
-    process_axis.set_ylabel("log refreshing process", fontsize=11)
+    process_axis.set_ylabel("log resetting process", fontsize=11)
     process_axis.set_xlabel("Token position", fontsize=11)
     process_axis.set_xlim(0.5, pivots.size + 0.5)
 
@@ -587,18 +587,18 @@ def build_human_watermark_figure() -> None:
         axis.tick_params(labelsize=10, colors=ink)
 
     fig.suptitle(
-        "Refreshing process for mixed Efron and watermarked text",
+        "Resetting process for mixed Efron and watermarked text",
         fontsize=15,
         color=ink,
         y=0.99,
     )
     fig.legend(
         handles=[
-            Line2D([], [], color=curve_color, linewidth=1.8, label="log refreshing process"),
+            Line2D([], [], color=curve_color, linewidth=1.8, label="log resetting process"),
             Line2D([], [], color=alarm_color, linestyle="--", linewidth=1.6,
                    label=r"threshold $\log(49)$"),
             Line2D([], [], marker="o", linestyle="none", color=alarm_color,
-                   markersize=6, label="alarm and refresh"),
+                   markersize=6, label="alarm and reset"),
             Line2D([], [], color=report_color, linewidth=3.2, label="localized report"),
             Patch(facecolor=watermark_color, label="watermarked OPT-1.3B block"),
             Patch(facecolor=human_color, label="fixed Efron block"),
@@ -612,7 +612,7 @@ def build_human_watermark_figure() -> None:
     fig.subplots_adjust(left=0.105, right=0.985, top=0.93, bottom=0.15)
     for suffix in ("png", "pdf"):
         fig.savefig(
-            FIGURES / f"figure12_human_watermark_refreshing_process.{suffix}",
+            FIGURES / f"figure12_human_watermark_resetting_process.{suffix}",
             dpi=300,
             facecolor="white",
         )

@@ -9,7 +9,7 @@ For a prespecified lambda, the nonadaptive multiplier is
     E_t(lambda) = (1-lambda) + lambda * {-log(1-Y_t)}.
 
 The declared grid is lambda in {0.10, 0.25, 0.50, 0.75}; every detector uses
-refreshing, the global-minimum localizer, and the common comparison threshold
+resetting, the global-minimum localizer, and the common comparison threshold
 gamma=48.8972017 (displayed as 49).  This is the same threshold used by WA,
 Online Grenander, and their average.  Under the independent-multiplier theorem
 the fixed-lambda Final report FDR bound is therefore 1/(gamma-1), about 2.09%.
@@ -38,11 +38,11 @@ sys.path.insert(0, str(DETECTOR_DIR))
 
 import analyze_opt13b_paths as opt_base  # noqa: E402
 import generate_fresh_opt13b as generation  # noqa: E402
-from refreshing_swz import (  # noqa: E402
+from resetting_swz import (  # noqa: E402
     annotate_reports,
     fixed_e_factors,
     path_metrics,
-    run_refreshing_from_evalues,
+    run_resetting_from_evalues,
 )
 ANALYSIS_VERSION = "fixed-lambda-opt-v4-common-gamma49"
 LAMBDAS = (0.10, 0.25, 0.50, 0.75)
@@ -55,7 +55,7 @@ def lambda_tag(lam: float) -> str:
 
 
 def method_name(lam: float) -> str:
-    return f"fixed_lambda_{lambda_tag(lam)}_refresh_h49"
+    return f"fixed_lambda_{lambda_tag(lam)}_reset_h49"
 
 
 def method_label(lam: float) -> str:
@@ -174,7 +174,7 @@ def run_opt(
         scenario_fields = opt_base._scenario_fields(spec)
         for lam in LAMBDAS:
             factor = fixed_e_factors(pivots, lam)
-            result = run_refreshing_from_evalues(factor, threshold=THRESHOLD)
+            result = run_resetting_from_evalues(factor, threshold=THRESHOLD)
             annotated = annotate_reports(result.report_dicts(), regions)
             metrics = path_metrics(annotated, regions, horizon=spec.horizon)
             predicted = int(metrics["predicted_tokens"])
@@ -283,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "source_sha256": {
             "analysis": opt_base.sha256_file(Path(__file__).resolve()),
-            "detector": opt_base.sha256_file(DETECTOR_DIR / "refreshing_swz.py"),
+            "detector": opt_base.sha256_file(DETECTOR_DIR / "resetting_swz.py"),
             "opt_generator": opt_base.sha256_file(
                 GENERATION_DIR / "generate_fresh_opt13b.py"
             ),

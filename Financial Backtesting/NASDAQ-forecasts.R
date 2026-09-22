@@ -358,6 +358,6 @@ save_rds_atomic(bundle, output_file)
 message("Saved regenerated forecast bundle to ", normalizePath(output_file))
 message(
   "Figure 14 dates: ", min(as.Date(bundle$figure14$date)), " through ",
-  max(as.Date(bundle$figure14$date)), "; refreshing backtest dates: ",
+  max(as.Date(bundle$figure14$date)), "; resetting backtest dates: ",
   min(bundle$backtest$dates), " through ", max(bundle$backtest$dates)
 )

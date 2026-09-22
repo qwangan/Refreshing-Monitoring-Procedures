@@ -12,8 +12,8 @@ gamma <- 11
 n_rep <- 1000L
 t_index <- seq_len(T_horizon)
 
-localized_blocks <- function(refreshed) {
-  rejection_times <- which(refreshed >= gamma)
+localized_blocks <- function(reset_process) {
+  rejection_times <- which(reset_process >= gamma)
   if (!length(rejection_times)) {
     return(data.frame(start = integer(), end = integer()))
   }
@@ -21,7 +21,7 @@ localized_blocks <- function(refreshed) {
   answer <- vector("list", length(rejection_times))
   for (j in seq_along(rejection_times)) {
     tau <- rejection_times[j]
-    block_path <- c(1, refreshed[block_start:tau])
+    block_path <- c(1, reset_process[block_start:tau])
     last_minimum <- max(which(block_path == min(block_path)))
     sigma <- if (last_minimum == 1L) block_start else block_start + last_minimum - 1L
     answer[[j]] <- data.frame(start = sigma, end = tau)
@@ -35,16 +35,16 @@ run_path <- function(mu) {
   e_value <- exp(x - 0.5)
   factor <- 1 - lambda + lambda * e_value
   original <- cumprod(factor)
-  refreshed <- numeric(length(mu))
+  reset_process <- numeric(length(mu))
   for (t in seq_along(mu)) {
-    refreshed[t] <- if (t == 1L || refreshed[t - 1L] >= gamma) {
+    reset_process[t] <- if (t == 1L || reset_process[t - 1L] >= gamma) {
       factor[t]
     } else {
-      refreshed[t - 1L] * factor[t]
+      reset_process[t - 1L] * factor[t]
     }
   }
   list(x = x, e_value = e_value, original = original,
-       refreshed = refreshed, blocks = localized_blocks(refreshed))
+       reset_process = reset_process, blocks = localized_blocks(reset_process))
 }
 
 path_metrics <- function(path, alternative) {
@@ -73,13 +73,13 @@ signal_intervals <- function(alternative) {
   data.frame(start = starts[runs$values], end = ends[runs$values])
 }
 
-plot_refreshing_path <- function(path, alternative, file, shocks = FALSE) {
-  y <- log(path$refreshed)
+plot_resetting_path <- function(path, alternative, file, shocks = FALSE) {
+  y <- log(path$reset_process)
   ylim <- range(c(y, log(gamma)), finite = TRUE)
   ylim[1] <- max(ylim[1], -2)
   pdf(file, width = 8, height = 4.8)
   par(mar = c(4.4, 4.8, 0.8, 0.8))
-  plot(t_index, y, type = "n", xlab = "t", ylab = "log refreshing process",
+  plot(t_index, y, type = "n", xlab = "t", ylab = "log resetting process",
        ylim = ylim)
   signals <- signal_intervals(alternative)
   if (shocks) {
@@ -98,7 +98,7 @@ plot_refreshing_path <- function(path, alternative, file, shocks = FALSE) {
   }
   abline(h = log(gamma), col = "gray45", lty = 2)
   lines(t_index, y, col = "#0072B2", lwd = 1.2)
-  rejection_times <- which(path$refreshed >= gamma)
+  rejection_times <- which(path$reset_process >= gamma)
   points(rejection_times, y[rejection_times], pch = 16, cex = 0.55,
          col = "#9E2A16")
   dev.off()
@@ -116,12 +116,12 @@ dev.off()
 
 set.seed(20260811L)
 representative_recurring <- run_path(mu_recurring)
-plot_refreshing_path(representative_recurring, alternative_recurring,
+plot_resetting_path(representative_recurring, alternative_recurring,
                      file.path(out_dir, "Figure7.pdf"))
 
 set.seed(20260806L)
 representative_shocks <- run_path(mu_shocks)
-plot_refreshing_path(representative_shocks, alternative_shocks,
+plot_resetting_path(representative_shocks, alternative_shocks,
                      file.path(out_dir, "Figure8.pdf"), shocks = TRUE)
 
 monte_carlo <- function(mu, alternative, seed) {

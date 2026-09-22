@@ -43,17 +43,17 @@ sys.path.insert(0, str(GENERATION_DIR))
 sys.path.insert(0, str(DETECTOR_DIR))
 
 import generate_fresh_opt13b as generation  # noqa: E402
-from refreshing_swz import (  # noqa: E402
+from resetting_swz import (  # noqa: E402
     alpha_for_general_fdr_target,
     annotate_reports,
     general_dependence_bound,
     path_metrics,
-    run_refreshing_from_pivots,
+    run_resetting_from_pivots,
 )
 
 
 SCHEMA_VERSION = 1
-ANALYSIS_VERSION = "paired-opt13b-refreshing-v5-cap05"
+ANALYSIS_VERSION = "paired-opt13b-resetting-v5-cap05"
 ADAPTIVE_CAP = 0.5
 BOOTSTRAP_SEED = 202608020941
 DEFAULT_BOOTSTRAP_REPLICATES = 5_000
@@ -86,8 +86,8 @@ def general_calibration_tag(target: float) -> str:
 def method_configuration(target: float) -> tuple[tuple[str, ...], dict[str, str], tuple, str]:
     calibration = general_calibration_tag(target)
     general_one_shot = f"swz_one_shot_{calibration}"
-    general_whole_block = f"swz_refresh_whole_block_{calibration}"
-    general_local = f"swz_refresh_local_{calibration}"
+    general_whole_block = f"swz_reset_whole_block_{calibration}"
+    general_local = f"swz_reset_local_{calibration}"
     percentage = int(round(100.0 * target))
     order = (
         general_one_shot,
@@ -99,11 +99,11 @@ def method_configuration(target: float) -> tuple[tuple[str, ...], dict[str, str]
             f"SWZ adaptive, stop after first report (general {percentage}% threshold)"
         ),
         general_whole_block: (
-            "SWZ adaptive + refresh, whole block "
+            "SWZ adaptive + reset, whole block "
             f"(general {percentage}% threshold)"
         ),
         general_local: (
-            "SWZ adaptive + refresh + global-min localizer "
+            "SWZ adaptive + reset + global-min localizer "
             f"(general {percentage}% threshold)"
         ),
     }
@@ -321,15 +321,15 @@ def replay_methods(
     general_threshold: float,
     general_calibration: str = DEFAULT_GENERAL_CALIBRATION,
 ) -> tuple[dict[str, list[dict]], dict]:
-    cumulative_general = run_refreshing_from_pivots(
+    cumulative_general = run_resetting_from_pivots(
         pivots,
         strategy="adaptive_cumulative",
         threshold=general_threshold,
         cap=ADAPTIVE_CAP,
     )
     general_one_shot = f"swz_one_shot_{general_calibration}"
-    general_whole_block = f"swz_refresh_whole_block_{general_calibration}"
-    general_local = f"swz_refresh_local_{general_calibration}"
+    general_whole_block = f"swz_reset_whole_block_{general_calibration}"
+    general_local = f"swz_reset_local_{general_calibration}"
     reports = {
         general_one_shot: [cumulative_general.reports[0].as_dict()]
         if cumulative_general.reports
@@ -989,7 +989,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "bootstrap_replicates": args.bootstrap_replicates,
         "source_sha256": {
             "analysis_runner": sha256_file(Path(__file__).resolve()),
-            "detector": sha256_file(DETECTOR_DIR / "refreshing_swz.py"),
+            "detector": sha256_file(DETECTOR_DIR / "resetting_swz.py"),
             "generator": sha256_file(GENERATION_DIR / "generate_fresh_opt13b.py"),
             "protocol_current_with_postlock_amendment": PROTOCOL_CURRENT_SHA256,
             "protocol_locked_prefix_before_amendment": PROTOCOL_LOCKED_PREFIX_SHA256,

@@ -1,13 +1,13 @@
-"""SWZ e-processes, refreshing, localization, and evaluation.
+"""SWZ e-processes, resetting, localization, and evaluation.
 
-The code in this module is deliberately model agnostic.  It consumes the
-Gumbel-max pivots ``Y_t`` saved by a language-model generation run and replays
+The code in this module is deliberately model agnostic.  It consumes scalar
+pivots ``Y_t`` saved by a language-model generation run and replays
 several betting rules on exactly the same path.
 
 Conventions
 -----------
 * Tokens and true regions are one-based.
-* A refreshing report is ``(sigma, tau]`` and therefore contains the integer
+* A resetting report is ``(sigma, tau]`` and therefore contains the integer
   tokens ``sigma + 1, ..., tau``.
 * A report is *localized false* iff its reported interval contains no token
   from any true watermark region.  This is the truth definition used for the
@@ -26,7 +26,7 @@ The adaptive rule is the weighted adaptive log calibrator in Su, Wang, and Zhao:
 
 The paper uses ``cap=1/2`` in its implementations.  We call the betting
 fraction ``eta`` to avoid confusing it with unrelated lambda notation in the
-refreshing paper.
+resetting paper.
 
 This module also implements the endpoint-adjusted Online Grenander (OG)
 calibrator in SWZ equation (13),
@@ -109,7 +109,7 @@ class Region:
 
 @dataclass(frozen=True)
 class Report:
-    """One atomic refreshing report with interval ``(sigma, tau]``."""
+    """One atomic resetting report with interval ``(sigma, tau]``."""
 
     report: int
     previous_tau: int
@@ -185,8 +185,8 @@ def calibrator_values(pivot_y: Iterable[float]) -> np.ndarray:
     """Return ``X_t=-log(1-Y_t)`` using the SWZ log calibrator.
 
     Exact endpoints are accepted.  ``Y=1`` is clipped only to the smallest
-    positive float so that a finite log value can be stored.  Gumbel keys are
-    continuous, so this guard has probability zero in the mathematical model.
+    positive float so that a finite log value can be stored. Continuous null
+    pivots hit this endpoint with probability zero in the mathematical model.
     """
 
     y = _one_dimensional_float_array(pivot_y, "pivot_y")
@@ -371,7 +371,7 @@ def online_grenander_e_factors(pivot_y: Iterable[float]) -> np.ndarray:
     The factor at time ``t`` is fitted strictly from pivots before ``t``.
     This reference implementation favors transparency and mathematical audit:
     it refits the weighted Grenander estimator at each token.  Horizon 600 is
-    small enough for smoke tests; a full 1,400-path replay should benchmark or
+    small enough for smoke tests; a full study replay should benchmark or
     optimize this routine before launch.
     """
 
@@ -386,7 +386,7 @@ def online_grenander_e_factors(pivot_y: Iterable[float]) -> np.ndarray:
     return e_values
 
 
-class _RefreshingState:
+class _ResettingState:
     """Internal state machine shared by precomputed and adaptive runs."""
 
     def __init__(self, horizon: int, threshold: float) -> None:
@@ -475,7 +475,7 @@ def _make_result(
     calibrator_x: np.ndarray,
     bet_fraction: np.ndarray,
     e_factor: np.ndarray,
-    state: _RefreshingState,
+    state: _ResettingState,
 ) -> DetectorResult:
     with np.errstate(divide="ignore"):
         log_e = np.log(e_factor)
@@ -499,17 +499,17 @@ def _make_result(
     )
 
 
-def run_refreshing_from_evalues(
+def run_resetting_from_evalues(
     e_values: Iterable[float],
     *,
     threshold: float = 21.0,
 ) -> DetectorResult:
-    """Run refreshing and last-global-minimum localization on given e-factors."""
+    """Run resetting and last-global-minimum localization on given e-factors."""
 
     e = _one_dimensional_float_array(e_values, "e_values")
     if np.any(e < 0.0):
         raise ValueError("e-factors must be nonnegative")
-    state = _RefreshingState(e.size, threshold)
+    state = _ResettingState(e.size, threshold)
     for zero_t, e_t in enumerate(e):
         state.step(zero_t, float(e_t))
     nan = np.full(e.size, np.nan, dtype=np.float64)
@@ -532,7 +532,7 @@ def run_average_from_component_evalues(
     *,
     threshold: float = 21.0,
 ) -> DetectorResult:
-    """Refresh the exact 50/50 average from precomputed component factors.
+    """Reset the exact 50/50 average from precomputed component factors.
 
     This is valid for cumulative calibrator adaptation, because each component
     factor is chosen from the strict past and does not depend on capital-reset
@@ -554,7 +554,7 @@ def run_average_from_component_evalues(
 
     horizon = wa.size
     effective = np.empty(horizon, dtype=np.float64)
-    state = _RefreshingState(horizon, threshold)
+    state = _ResettingState(horizon, threshold)
     wa_logcapital = 0.0
     og_logcapital = 0.0
     mixture_logcapital = 0.0
@@ -589,7 +589,7 @@ def run_average_from_component_evalues(
     )
 
 
-def run_refreshing_from_pivots(
+def run_resetting_from_pivots(
     pivot_y: Iterable[float],
     *,
     strategy: str = "adaptive_cumulative",
@@ -604,7 +604,7 @@ def run_refreshing_from_pivots(
     ----------
     strategy:
         ``"adaptive_cumulative"`` keeps all past calibrator observations when
-        refreshing capital.  ``"adaptive_block_reset"`` discards the bettor's
+        resetting capital.  ``"adaptive_block_reset"`` discards the bettor's
         history after each alarm, so the first token of every new block uses
         ``eta=0``.  ``"fixed"`` uses ``fixed_eta`` at every token.
 
@@ -629,7 +629,7 @@ def run_refreshing_from_pivots(
     horizon = y.size
     eta_values = np.empty(horizon, dtype=np.float64)
     e_values = np.empty(horizon, dtype=np.float64)
-    state = _RefreshingState(horizon, threshold)
+    state = _ResettingState(horizon, threshold)
     block_history_start = 0
 
     for zero_t in range(horizon):
@@ -648,7 +648,7 @@ def run_refreshing_from_pivots(
         crossed = state.step(zero_t, e_t)
         if crossed and strategy == "adaptive_block_reset":
             # The crossing observation belongs to the completed block.  It is
-            # not used to choose the first bet after refresh.
+            # not used to choose the first bet after reset.
             block_history_start = zero_t + 1
 
     return _make_result(
@@ -672,10 +672,10 @@ def run_online_grenander_from_pivots(
 ) -> DetectorResult:
     """Replay SWZ's endpoint-adjusted Online Grenander e-process.
 
-    ``og_cumulative`` retains every past pivot when detector capital refreshes.
+    ``og_cumulative`` retains every past pivot when detector capital resets.
     ``og_block_reset`` is our predictable extension: after a crossing, both
     detector capital and the Grenander fitting history restart.  SWZ study the
-    cumulative process; they do not propose the refreshing block-reset variant.
+    cumulative process; they do not propose the resetting block-reset variant.
     """
 
     allowed = {"og_cumulative", "og_block_reset"}
@@ -687,7 +687,7 @@ def run_online_grenander_from_pivots(
     horizon = y.size
     e_values = np.empty(horizon, dtype=np.float64)
     no_bet_fraction = np.full(horizon, np.nan, dtype=np.float64)
-    state = _RefreshingState(horizon, threshold)
+    state = _ResettingState(horizon, threshold)
     history_start = 0
 
     for zero_t, p_t in enumerate(p):
@@ -725,9 +725,9 @@ def run_average_from_pivots(
 
     ``M_t = .5 M_t^WA + .5 M_t^OG``.
 
-    Consequently the effective factor supplied to the refreshing state is the
+    Consequently the effective factor supplied to the resetting state is the
     ratio of successive mixture capitals, not ``.5(E_t^WA+E_t^OG)``.  At a
-    refreshing alarm both component capitals restart at one.  In cumulative
+    resetting alarm both component capitals restart at one.  In cumulative
     mode their calibrators still learn from the entire strict past; in the
     block-reset extension their fitting histories restart as well.
     """
@@ -743,7 +743,7 @@ def run_average_from_pivots(
     horizon = y.size
     eta_values = np.empty(horizon, dtype=np.float64)
     effective_e_values = np.empty(horizon, dtype=np.float64)
-    state = _RefreshingState(horizon, threshold)
+    state = _ResettingState(horizon, threshold)
     history_start = 0
     wa_logcapital = 0.0
     og_logcapital = 0.0

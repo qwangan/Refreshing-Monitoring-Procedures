@@ -14,12 +14,12 @@ from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
-from refreshing_swz import (
+from resetting_swz import (
     annotate_reports,
     path_metrics,
     run_average_from_component_evalues,
     run_online_grenander_from_pivots,
-    run_refreshing_from_pivots,
+    run_resetting_from_pivots,
 )
 import generate_tournament_opt13b as generation
 
@@ -31,8 +31,8 @@ WA_CAP = 0.5
 FIXED_LAMBDAS = (0.10, 0.25, 0.50, 0.75)
 PRIMARY_METHODS = (
     "one_shot_global_min",
-    "refresh_whole_block",
-    "refresh_global_min",
+    "reset_whole_block",
+    "reset_global_min",
 )
 PROCESS_METHODS = (
     "average_50_50",
@@ -108,7 +108,7 @@ def method_metrics(reports: Sequence[Mapping] | Sequence, regions, horizon: int)
 
 
 def process_results(pivots: np.ndarray) -> tuple[dict[str, object], dict[str, float]]:
-    wa = run_refreshing_from_pivots(
+    wa = run_resetting_from_pivots(
         pivots, strategy="adaptive_cumulative", threshold=THRESHOLD, cap=WA_CAP
     )
     og = run_online_grenander_from_pivots(
@@ -129,7 +129,7 @@ def process_results(pivots: np.ndarray) -> tuple[dict[str, object], dict[str, fl
     }
     for lam in FIXED_LAMBDAS:
         name = f"fixed_lambda_{lam:.2f}".replace(".", "p")
-        result = run_refreshing_from_pivots(
+        result = run_resetting_from_pivots(
             pivots, strategy="fixed", fixed_eta=lam, threshold=THRESHOLD
         )
         processes[name] = result
@@ -224,8 +224,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 wa = processes["weight_adaptive"]
                 primary_reports = {
                     "one_shot_global_min": [wa.reports[0].as_dict()] if wa.reports else [],
-                    "refresh_whole_block": whole_block_reports(wa.reports),
-                    "refresh_global_min": wa.report_dicts(),
+                    "reset_whole_block": whole_block_reports(wa.reports),
+                    "reset_global_min": wa.report_dicts(),
                 }
                 if tuple(primary_reports) != PRIMARY_METHODS:
                     raise AssertionError("primary reporting-method order changed")
@@ -269,7 +269,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 save_trace(args.output_dir / "traces" / f"{spec.path_uid}.npz", processes)
             elif spec.schedule_id == "four_l050_g025":
-                wa = run_refreshing_from_pivots(
+                wa = run_resetting_from_pivots(
                     pivots,
                     strategy="adaptive_cumulative",
                     threshold=THRESHOLD,

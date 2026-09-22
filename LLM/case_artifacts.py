@@ -17,7 +17,7 @@ def contiguous_intervals(mask: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(starts.tolist(), ends.tolist(), strict=True))
 
 
-def render_refreshing_process(
+def render_resetting_process(
     output_pdf: Path,
     output_png: Path,
     arrays: dict[str, np.ndarray],
@@ -126,7 +126,7 @@ def render_refreshing_process(
         lower - 0.15,
         max(float(candidate.max()), math.log(threshold)) + 0.55,
     )
-    process_axis.set_ylabel("log refreshing process", fontsize=11)
+    process_axis.set_ylabel("log resetting process", fontsize=11)
     process_axis.set_xlabel("Token position", fontsize=11)
     process_axis.set_xlim(0.5, pivots.size + 0.5)
 
@@ -137,18 +137,18 @@ def render_refreshing_process(
         axis.tick_params(labelsize=10, colors=ink)
 
     fig.suptitle(
-        f"Refreshing process for mixed Efron and {watermark_label} text",
+        f"Resetting process for mixed Efron and {watermark_label} text",
         fontsize=15,
         color=ink,
         y=0.99,
     )
     fig.legend(
         handles=[
-            Line2D([], [], color=curve_color, linewidth=1.8, label="log refreshing process"),
+            Line2D([], [], color=curve_color, linewidth=1.8, label="log resetting process"),
             Line2D([], [], color=alarm_color, linestyle="--", linewidth=1.6,
                    label=rf"threshold $\log({threshold:g})$"),
             Line2D([], [], marker="o", linestyle="none", color=alarm_color,
-                   markersize=6, label="alarm and refresh"),
+                   markersize=6, label="alarm and reset"),
             Line2D([], [], color=report_color, linewidth=3.2, label="localized report"),
             Patch(facecolor=watermark_color, label=f"{watermark_label} block"),
             Patch(facecolor=human_color, label="fixed Efron block"),

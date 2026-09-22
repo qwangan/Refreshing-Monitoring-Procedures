@@ -37,7 +37,7 @@ from sentence_aligned_case import (
     should_stop_generated_block,
     write_blind_text,
 )
-from case_artifacts import render_refreshing_process
+from case_artifacts import render_resetting_process
 
 from efron_contract import (
     ALLOWED_METRICS,
@@ -68,7 +68,7 @@ from efron_contract import (
     TOURNAMENT_SAMPLE_STREAM,
     validate_source,
 )
-from refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
+from resetting_swz import Region, path_metrics, run_resetting_from_pivots
 from tournament_watermark import binomial_randomized_pit, stable_calibrator
 
 
@@ -684,11 +684,11 @@ def render_case_box(
         truth.tolist(),
         selected.tolist(),
     )
-    lines = wrap_masked_text(text, truth_chars, selected_chars)
-    height = max(4.2, 2.0 + 0.175 * len(lines))
+    lines = wrap_masked_text(text, truth_chars, selected_chars, width=108)
+    height = max(4.2, 2.05 + 0.19 * len(lines))
     fig = plt.figure(figsize=(8.0, height), facecolor="white")
     text_ax = fig.add_subplot(1, 1, 1)
-    fig.subplots_adjust(left=0.035, right=0.985, top=0.91, bottom=0.105)
+    fig.subplots_adjust(left=0.025, right=0.99, top=0.90, bottom=0.115)
 
     text_ax.set_xlim(0.0, 1.0)
     text_ax.set_ylim(len(lines) + 0.3, -0.8)
@@ -697,7 +697,7 @@ def render_case_box(
     for spine in text_ax.spines.values():
         spine.set_color("#AAB7BE")
         spine.set_linewidth(0.9)
-    fontsize = 8.2
+    fontsize = 9.2
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     axis_width_pixels = float(text_ax.get_window_extent(renderer).width)
@@ -711,7 +711,7 @@ def render_case_box(
     )
     for line_number, (line, line_truth, line_selected) in enumerate(lines):
         y = line_number + 0.15
-        x_pixels = 0.012 * axis_width_pixels
+        x_pixels = 0.010 * axis_width_pixels
         for run in styled_line_runs(line, line_truth, line_selected):
             font = FontProperties(
                 family="DejaVu Serif",
@@ -759,7 +759,7 @@ def render_case_box(
         "Human/watermarked localization in Bradley Efron's Large-Scale Inference",
         x=0.5,
         y=0.995,
-        fontsize=12.5,
+        fontsize=13.2,
         fontweight="bold",
         color=FIGURE_INK,
     )
@@ -769,7 +769,7 @@ def render_case_box(
         metric_line,
         ha="center",
         va="top",
-        fontsize=8.7,
+        fontsize=9.2,
         color=TRUE_REJECTION_COLOR,
     )
     legend = fig.legend(
@@ -783,7 +783,7 @@ def render_case_box(
         bbox_to_anchor=(0.5, 0.026),
         ncol=4,
         frameon=False,
-        fontsize=7.8,
+        fontsize=8.4,
     )
     legend.get_texts()[1].set_fontstyle("italic")
     legend.get_texts()[2].set_color(TRUE_REJECTION_COLOR)
@@ -794,7 +794,7 @@ def render_case_box(
         "Source: Bradley Efron (2010); one prespecified descriptive path, not an FDR estimate.",
         ha="left",
         va="bottom",
-        fontsize=6.8,
+        fontsize=7.4,
         color=FIGURE_INK,
     )
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -958,8 +958,8 @@ def build_derived_artifacts(
     png_path = output_dir / "efron_tournament_case_box.png"
     tex_path = output_dir / "efron_tournament_case_box.tex"
     direct_tex_path = output_dir / "efron_mixed_passage.tex"
-    process_pdf_path = output_dir / "efron_tournament_refreshing_process.pdf"
-    process_png_path = output_dir / "efron_tournament_refreshing_process.png"
+    process_pdf_path = output_dir / "efron_tournament_resetting_process.pdf"
+    process_png_path = output_dir / "efron_tournament_resetting_process.png"
     mixed_text = tokenizer.decode(
         arrays["token_id"].astype(int).tolist(),
         skip_special_tokens=False,
@@ -988,7 +988,7 @@ def build_derived_artifacts(
             metrics,
         ),
     )
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         np.asarray(arrays["pivot_y"], dtype=float),
         strategy=DETECTOR_STRATEGY,
         threshold=THRESHOLD_EXACT,
@@ -998,8 +998,8 @@ def build_derived_artifacts(
         report_union_mask(detector.reports, len(arrays["pivot_y"])),
         arrays["selected_by_any_report"],
     ):
-        raise RuntimeError("refreshing-process replay differs from saved selection")
-    render_refreshing_process(
+        raise RuntimeError("resetting-process replay differs from saved selection")
+    render_resetting_process(
         process_pdf_path,
         process_png_path,
         arrays,
@@ -1032,10 +1032,10 @@ def build_derived_artifacts(
         "latex_fragment_sha256": sha256_file(tex_path),
         "direct_mixed_passage_tex": direct_tex_path.name,
         "direct_mixed_passage_tex_sha256": sha256_file(direct_tex_path),
-        "refreshing_process_pdf": process_pdf_path.name,
-        "refreshing_process_pdf_sha256": sha256_file(process_pdf_path),
-        "refreshing_process_png": process_png_path.name,
-        "refreshing_process_png_sha256": sha256_file(process_png_path),
+        "resetting_process_pdf": process_pdf_path.name,
+        "resetting_process_pdf_sha256": sha256_file(process_pdf_path),
+        "resetting_process_png": process_png_path.name,
+        "resetting_process_png_sha256": sha256_file(process_png_path),
         "blind_mixed_text": blind_path.name,
         "blind_mixed_text_sha256": sha256_file(blind_path),
         "metrics_csv": table_csv_path.name,
@@ -1055,7 +1055,7 @@ def replay_saved(tokenizer, output_dir: Path) -> int:
         raise RuntimeError("saved array hash mismatch")
     with np.load(arrays_path, allow_pickle=False) as archive:
         arrays = {name: np.asarray(archive[name]).copy() for name in archive.files}
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         arrays["pivot_y"],
         strategy=DETECTOR_STRATEGY,
         threshold=THRESHOLD_EXACT,
@@ -1132,7 +1132,7 @@ def run_smoke(tokenizer, model, torch, source_text: str) -> int:
     pivots = np.asarray(generated["pivot_y"])
     if pivots.shape != (13,) or not np.all((pivots > 0) & (pivots < 1)):
         raise RuntimeError("model smoke failed")
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         pivots,
         strategy=DETECTOR_STRATEGY,
         threshold=THRESHOLD_EXACT,
@@ -1198,7 +1198,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     generated = generate_mixed_document(tokenizer, model, torch, blocks)
     horizon = int(generated["horizon"])
     pivots = np.asarray(generated["pivot_y"], dtype=np.float64)
-    detector = run_refreshing_from_pivots(
+    detector = run_resetting_from_pivots(
         pivots,
         strategy=DETECTOR_STRATEGY,
         threshold=THRESHOLD_EXACT,
@@ -1285,7 +1285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "threshold_exact": THRESHOLD_EXACT,
         "threshold_display": THRESHOLD_DISPLAY,
         "eprocess": f"weighted adaptive e-process, cap {SWZ_CAP:g}",
-        "localizer": "refreshing plus last global minimum",
+        "localizer": "resetting plus last global minimum",
         "blocks": serialize_blocks(blocks),
         "alternative_intervals": [[region.start, region.end] for region in regions],
         "reports": [asdict(report) for report in detector.reports],

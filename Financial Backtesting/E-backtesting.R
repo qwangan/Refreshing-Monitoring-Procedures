@@ -1,4 +1,4 @@
-## Section 5.3: refreshing e-backtesting of NASDAQ Composite forecasts.
+## Section 5.3: resetting e-backtesting of NASDAQ Composite forecasts.
 
 args <- commandArgs(trailingOnly = FALSE)
 script_arg <- args[grepl("^--file=", args)]
@@ -107,7 +107,7 @@ one_shot <- do.call(rbind, lapply(forecast_pairs, function(x) {
   compute_path(x$r, x$z)$log_grem
 }))
 
-refresh <- function(log_path) {
+reset <- function(log_path) {
   increments <- c(log_path[1], diff(log_path))
   answer <- numeric(length(log_path))
   answer[1] <- increments[1]
@@ -120,7 +120,7 @@ refresh <- function(log_path) {
   }
   answer
 }
-refreshed <- t(apply(one_shot, 1, refresh))
+reset_process <- t(apply(one_shot, 1, reset))
 
 localized_blocks <- function(path) {
   rejection_times <- which(path >= log(gamma))
@@ -141,7 +141,7 @@ localized_blocks <- function(path) {
 }
 
 localized_rejection_blocks <- do.call(rbind, lapply(seq_along(labels), function(i) {
-  blocks <- localized_blocks(refreshed[i, ])
+  blocks <- localized_blocks(reset_process[i, ])
   if (!nrow(blocks)) return(NULL)
   data.frame(
     forecast = labels[i],
@@ -156,7 +156,7 @@ write.csv(
   row.names = FALSE
 )
 
-## Figure 15: original GREM process and four refreshing processes.
+## Figure 15: original GREM process and four resetting processes.
 ylim <- backtest$e_lim
 block_colors <- c("#FDB462", "#80B1D3", "#B3DE69", "#FCCDE5",
                   "#BC80BD", "#CCEBC5")
@@ -173,9 +173,9 @@ legend("topleft", labels, col = colors, lwd = 1, bty = "n", cex = 0.68)
 title("One-shot GREM")
 
 for (i in 1:4) {
-  blocks <- localized_blocks(refreshed[i, ])
-  plot(dates, refreshed[i, ], type = "n", xlab = "dates",
-       ylab = "log refreshing process", ylim = ylim)
+  blocks <- localized_blocks(reset_process[i, ])
+  plot(dates, reset_process[i, ], type = "n", xlab = "dates",
+       ylab = "log resetting process", ylim = ylim)
   if (nrow(blocks)) {
     for (j in seq_len(nrow(blocks))) {
       rect(dates[blocks$start[j]], ylim[1], dates[blocks$end[j]], ylim[2],
@@ -185,9 +185,9 @@ for (i in 1:4) {
   }
   abline(h = log(gamma), lty = 2, col = "gray45")
   abline(v = event_dates, lty = 3, col = "gray35")
-  lines(dates, refreshed[i, ], col = colors[i])
-  rejection_times <- which(refreshed[i, ] >= log(gamma))
-  points(dates[rejection_times], refreshed[i, rejection_times], pch = 16,
+  lines(dates, reset_process[i, ], col = colors[i])
+  rejection_times <- which(reset_process[i, ] >= log(gamma))
+  points(dates[rejection_times], reset_process[i, rejection_times], pch = 16,
          cex = 0.55, col = colors[i])
   title(labels[i])
 }
