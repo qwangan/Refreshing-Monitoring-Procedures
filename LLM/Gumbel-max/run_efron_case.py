@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Run the prespecified Efron human-versus-watermark case study.
+"""Run the sentence-aligned Efron human-versus-Gumbel-max case study.
 
-Four paragraphs from printed page x of *Large-Scale Inference* are tokenized once.
-Two disjoint 100-token source spans are replaced by exact full-vocabulary
-Gumbel-max OPT-1.3B continuations, leaving a balanced H-W-H-W-H document of
-the same token length as the source. Human tokens are fixed without inspecting
-the current fresh key vector; their selected key coordinates are exact null
-pivots. This is one descriptive path, never a Monte Carlo estimate.
+A deterministic sentence-boundary optimizer fixes an approximately
+80/100/80/100/80 source partition before generation. The two 100-token target
+spans are replaced by complete, context-conditioned, watermarked OPT-1.3B
+sentences. Human tokens are fixed without inspecting the current fresh key
+vector. This is one descriptive path, never a Monte Carlo estimate.
 """
 
 from __future__ import annotations
@@ -26,16 +25,26 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+from sentence_aligned_case import (
+    assign_output_intervals,
+    build_sentence_aligned_plan,
+    finalize_generated_block,
+    set_reproducible_seeds,
+    should_stop_generated_block,
+    write_blind_text,
+)
+
 from efron_contract import (
     ALLOWED_METRICS,
-    ALTERNATIVE_INTERVALS,
     BIT_GENERATOR,
-    BLOCK_LENGTHS,
     CASE_ID,
     CASE_MASTER_SEED,
     DETECTOR_STRATEGY,
     KEY_STREAM,
-    MIN_HUMAN_BLOCK_TOKENS,
     MODEL_DTYPE,
     MODEL_NAME,
     MODEL_PARAMETER_COUNT,
@@ -55,7 +64,6 @@ from efron_contract import (
     TEMPERATURE,
     THRESHOLD_DISPLAY,
     THRESHOLD_EXACT,
-    WATERMARK_BLOCK_TOKENS,
     canonical_json,
     sha256_file,
     validate_static_contract,
@@ -115,92 +123,10 @@ def load_frozen_source(path: Path = DEFAULT_SOURCE) -> str:
     return text
 
 
-def balanced_human_lengths(
-    horizon: int,
-    watermark_tokens: int = WATERMARK_BLOCK_TOKENS,
-    minimum_human_tokens: int = MIN_HUMAN_BLOCK_TOKENS,
-) -> tuple[int, int, int]:
-    """Prespecified, outcome-independent human split for H-W-H-W-H."""
-
-    if watermark_tokens < 1:
-        raise ValueError("watermark_tokens must be positive")
-    remaining = horizon - 2 * watermark_tokens
-    if remaining < 3 * minimum_human_tokens:
-        raise ValueError("source is too short for two watermark replacements")
-    base, extra = divmod(remaining, 3)
-    lengths = tuple(base + int(index < extra) for index in range(3))
-    if max(lengths) - min(lengths) > 1 or sum(lengths) != remaining:
-        raise AssertionError("balanced human split failed")
-    return lengths  # type: ignore[return-value]
-
-
-def _build_plan_from_source_ids(
-    tokenizer,
-    source_ids: Sequence[int],
-    *,
-    watermark_tokens: int,
-    minimum_human_tokens: int,
-) -> tuple[list[dict], int]:
-    horizon = len(source_ids)
-    human_lengths = balanced_human_lengths(
-        horizon,
-        watermark_tokens=watermark_tokens,
-        minimum_human_tokens=minimum_human_tokens,
-    )
-    pattern = ("human", "watermarked", "human", "watermarked", "human")
-    lengths = (
-        human_lengths[0],
-        watermark_tokens,
-        human_lengths[1],
-        watermark_tokens,
-        human_lengths[2],
-    )
-    blocks: list[dict] = []
-    source_cursor = 0
-    output_cursor = 1
-    human_index = 0
-    watermark_index = 0
-    for kind, length in zip(pattern, lengths, strict=True):
-        source_slice = list(source_ids[source_cursor : source_cursor + length])
-        if len(source_slice) != length:
-            raise AssertionError("source plan overran the excerpt")
-        if kind == "human":
-            human_index += 1
-            name = f"Human source {human_index}"
-            fixed_ids: list[int] | None = source_slice
-        else:
-            watermark_index += 1
-            name = f"Watermarked replacement {watermark_index}"
-            fixed_ids = None
-        blocks.append(
-            {
-                "name": name,
-                "kind": kind,
-                "start": output_cursor,
-                "end": output_cursor + length - 1,
-                "length": length,
-                "source_start": source_cursor + 1,
-                "source_end": source_cursor + length,
-                "source_token_sha256": token_ids_sha256(source_slice),
-                "fixed_token_ids": fixed_ids,
-                "output_token_ids": None,
-                "output_text_sha256": None,
-            }
-        )
-        source_cursor += length
-        output_cursor += length
-    if source_cursor != horizon or output_cursor - 1 != horizon:
-        raise AssertionError("block plan did not consume the source exactly")
-    return blocks, horizon
-
-
 def build_block_plan(
     tokenizer,
     source_text: str,
-    *,
-    watermark_tokens: int = WATERMARK_BLOCK_TOKENS,
-    minimum_human_tokens: int = MIN_HUMAN_BLOCK_TOKENS,
-) -> tuple[list[dict], int, list[int]]:
+) -> tuple[list[dict], list[int]]:
     source_ids = list(tokenizer(source_text, add_special_tokens=False).input_ids)
     if not source_ids:
         raise RuntimeError("source tokenization is empty")
@@ -219,23 +145,10 @@ def build_block_plan(
             )
         if token_ids_sha256(source_ids) != SOURCE_OPT_TOKEN_SHA256:
             raise RuntimeError("pinned Efron source token IDs changed")
-    blocks, horizon = _build_plan_from_source_ids(
-        tokenizer,
-        source_ids,
-        watermark_tokens=watermark_tokens,
-        minimum_human_tokens=minimum_human_tokens,
-    )
-    if sha256_text(source_text) == SOURCE_EXCERPT_SHA256:
-        if tuple(int(block["length"]) for block in blocks) != BLOCK_LENGTHS:
-            raise RuntimeError("frozen block lengths changed")
-        intervals = tuple(
-            (int(block["start"]), int(block["end"]))
-            for block in blocks
-            if block["kind"] == "watermarked"
-        )
-        if intervals != ALTERNATIVE_INTERVALS:
-            raise RuntimeError("frozen alternative intervals changed")
-    return blocks, horizon, source_ids
+    blocks, planned_source_ids = build_sentence_aligned_plan(tokenizer, source_text)
+    if source_ids != planned_source_ids:
+        raise AssertionError("sentence-aligned planner changed the source tokenization")
+    return blocks, source_ids
 
 
 def select_exact_gumbel_max(scaled_logits: np.ndarray, key_u: np.ndarray) -> int:
@@ -300,30 +213,38 @@ def validate_loaded_model(model, tokenizer) -> str:
 
 
 def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> dict[str, object]:
-    horizon = sum(int(block["length"]) for block in blocks)
     prompt_ids = list(tokenizer(PROMPT, add_special_tokens=False).input_ids)
     if not prompt_ids:
         raise RuntimeError("prompt tokenization is empty")
-    if len(prompt_ids) + horizon > int(model.config.max_position_embeddings):
+    maximum_horizon = sum(
+        len(block["fixed_token_ids"])
+        if block["kind"] == "human"
+        else int(block["maximum_tokens"])
+        for block in blocks
+    )
+    if len(prompt_ids) + maximum_horizon > int(model.config.max_position_embeddings):
         raise RuntimeError("mixed document exceeds the pinned model context window")
 
     vocab_size = int(model.config.vocab_size)
-    key_rng = np.random.Generator(np.random.PCG64DXSM(CASE_MASTER_SEED))
+    key_rng = np.random.Generator(
+        np.random.PCG64DXSM(
+            np.random.SeedSequence(CASE_MASTER_SEED, spawn_key=(KEY_STREAM,))
+        )
+    )
     ordinary_seed = np.random.SeedSequence(
         CASE_MASTER_SEED,
         spawn_key=(ORDINARY_STREAM,),
     ).generate_state(4)
-    token_ids = np.empty(horizon, dtype=np.int32)
-    pivots = np.empty(horizon, dtype=np.float64)
-    is_watermarked = np.empty(horizon, dtype=bool)
-    block_index = np.empty(horizon, dtype=np.int8)
-    is_eos = np.empty(horizon, dtype=bool)
+    token_ids: list[int] = []
+    pivots: list[float] = []
+    is_watermarked: list[bool] = []
+    block_index: list[int] = []
+    is_eos: list[bool] = []
     eos_id = tokenizer.eos_token_id
 
     device = next(model.parameters()).device
     prompt_tensor = torch.tensor([prompt_ids], dtype=torch.long, device=device)
     started = time.perf_counter()
-    zero_t = 0
     with torch.inference_mode():
         initial = model(prompt_tensor, use_cache=True)
         next_logits = initial.logits[0, -1, :].detach().cpu().double().numpy()
@@ -331,7 +252,8 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
         for current_block_index, block in enumerate(blocks):
             human_ids = block["fixed_token_ids"] if block["kind"] == "human" else None
             generated_ids: list[int] = []
-            for offset in range(int(block["length"])):
+            offset = 0
+            while True:
                 scaled_logits = np.asarray(next_logits / TEMPERATURE, dtype=np.float64)
                 if not np.all(np.isfinite(scaled_logits)):
                     scaled_logits = scaled_logits.copy()
@@ -347,31 +269,44 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
                 if chosen_id is None:
                     chosen_id = select_exact_gumbel_max(scaled_logits, key_u)
 
-                token_ids[zero_t] = chosen_id
-                pivots[zero_t] = key_u[chosen_id]
-                is_watermarked[zero_t] = block["kind"] == "watermarked"
-                block_index[zero_t] = current_block_index
-                is_eos[zero_t] = eos_id is not None and chosen_id == eos_id
+                token_ids.append(chosen_id)
+                pivots.append(float(key_u[chosen_id]))
+                is_watermarked.append(block["kind"] == "watermarked")
+                block_index.append(current_block_index)
+                is_eos.append(eos_id is not None and chosen_id == eos_id)
                 generated_ids.append(chosen_id)
 
                 chosen = torch.tensor([[chosen_id]], dtype=torch.long, device=device)
                 updated = model(chosen, past_key_values=past, use_cache=True)
                 next_logits = updated.logits[0, -1, :].detach().cpu().double().numpy()
                 past = updated.past_key_values
-                zero_t += 1
-                if zero_t % 100 == 0 or zero_t == horizon:
-                    print(f"generated/scored {zero_t}/{horizon} monitored tokens", flush=True)
+                offset += 1
+                if len(token_ids) % 100 == 0:
+                    print(f"generated/scored {len(token_ids)} monitored tokens", flush=True)
+                if human_ids is not None:
+                    if offset >= len(human_ids):
+                        block["length"] = len(generated_ids)
+                        block["output_token_ids"] = generated_ids
+                        block["output_text_sha256"] = sha256_text(
+                            tokenizer.decode(
+                                generated_ids,
+                                skip_special_tokens=False,
+                                clean_up_tokenization_spaces=False,
+                            )
+                        )
+                        break
+                elif should_stop_generated_block(
+                    tokenizer,
+                    generated_ids,
+                    minimum_tokens=int(block["minimum_tokens"]),
+                    maximum_tokens=int(block["maximum_tokens"]),
+                ):
+                    finalize_generated_block(tokenizer, block, generated_ids)
+                    break
 
-            block["output_token_ids"] = generated_ids
-            block_text = tokenizer.decode(
-                generated_ids,
-                skip_special_tokens=False,
-                clean_up_tokenization_spaces=False,
-            )
-            block["output_text_sha256"] = sha256_text(block_text)
-
-    if zero_t != horizon:
-        raise AssertionError("generation stopped before the frozen horizon")
+    horizon = assign_output_intervals(blocks)
+    if len(token_ids) != horizon:
+        raise AssertionError("generated arrays and block intervals disagree")
     expected_truth = np.asarray(
         [
             block["kind"] == "watermarked"
@@ -380,14 +315,17 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
         ],
         dtype=bool,
     )
-    if not np.array_equal(is_watermarked, expected_truth):
+    truth_array = np.asarray(is_watermarked, dtype=bool)
+    if not np.array_equal(truth_array, expected_truth):
         raise AssertionError("truth mask does not match the frozen block plan")
+    print(f"generated/scored {horizon}/{horizon} monitored tokens", flush=True)
     return {
-        "token_id": token_ids,
-        "pivot_y": pivots,
-        "is_watermarked": is_watermarked,
-        "block_index": block_index,
-        "is_eos": is_eos,
+        "token_id": np.asarray(token_ids, dtype=np.int32),
+        "pivot_y": np.asarray(pivots, dtype=np.float64),
+        "is_watermarked": truth_array,
+        "block_index": np.asarray(block_index, dtype=np.int8),
+        "is_eos": np.asarray(is_eos, dtype=bool),
+        "horizon": horizon,
         "generation_seconds": time.perf_counter() - started,
         "prompt_token_count": len(prompt_ids),
         "ordinary_stream_seed_words": [int(value) for value in ordinary_seed],
@@ -995,9 +933,10 @@ def latex_figure_fragment(metrics: dict[str, float | int], pdf_name: str) -> str
 \centering
 \includegraphics[width=\linewidth]{{{pdf_name}}}
 \caption{{A prespecified mixed human/watermarked excerpt from Bradley Efron's
-\emph{{Large-Scale Inference}}. Two 100-token source spans are replaced by
-watermarked OPT-1.3B continuations, and paragraph breaks are collapsed for
-display only. All AI text is italic. Every rejected span is colored and
+\emph{{Large-Scale Inference}}. Two spans of complete source sentences are
+replaced by complete, Gumbel-max-watermarked OPT-1.3B sentences generated from
+the preceding context. Paragraph breaks are collapsed for display only. All AI
+text is italic. Every rejected span is colored and
 underlined: blue for a true rejection of AI text and vermillion for a false
 rejection of human text. The one-path values are
 Power={float(metrics['token_power']):.3f}, FDP={float(metrics['token_fdp']):.3f},
@@ -1057,6 +996,14 @@ def build_derived_artifacts(
     tex_path = output_dir / "efron_case_box.tex"
     process_pdf_path = output_dir / "efron_refreshing_process.pdf"
     process_png_path = output_dir / "efron_refreshing_process.png"
+    mixed_text = tokenizer.decode(
+        arrays["token_id"].astype(int).tolist(),
+        skip_special_tokens=False,
+        clean_up_tokenization_spaces=False,
+    )
+    blind_path = write_blind_text(output_dir, mixed_text)
+    table_csv_path = output_dir / "efron_case_metrics.csv"
+    table_tex_path = output_dir / "efron_case_metrics.tex"
     render_case_box(
         tokenizer,
         pdf_path,
@@ -1073,6 +1020,21 @@ def build_derived_artifacts(
         arrays,
         blocks,
     )
+    write_text_atomic(
+        table_csv_path,
+        "watermark,reports,token_power,token_fdp,token_iou,final_report_fdp,report_ufdp\n"
+        f"Gumbel-max,{int(metrics['reports'])},{float(metrics['token_power']):.9f},"
+        f"{float(metrics['token_fdp']):.9f},{float(metrics['token_iou']):.9f},"
+        f"{float(metrics['final_report_fdp']):.9f},{float(metrics['report_ufdp']):.9f}\n",
+    )
+    write_text_atomic(
+        table_tex_path,
+        "Gumbel--max & "
+        f"{int(metrics['reports'])} & {float(metrics['token_power']):.3f} & "
+        f"{float(metrics['token_fdp']):.3f} & {float(metrics['token_iou']):.3f} & "
+        f"{float(metrics['final_report_fdp']):.3f} & "
+        f"{float(metrics['report_ufdp']):.3f} \\\\\n",
+    )
     return {
         "figure_pdf": pdf_path.name,
         "figure_pdf_sha256": sha256_file(pdf_path),
@@ -1084,6 +1046,12 @@ def build_derived_artifacts(
         "refreshing_process_pdf_sha256": sha256_file(process_pdf_path),
         "refreshing_process_png": process_png_path.name,
         "refreshing_process_png_sha256": sha256_file(process_png_path),
+        "blind_mixed_text": blind_path.name,
+        "blind_mixed_text_sha256": sha256_file(blind_path),
+        "metrics_csv": table_csv_path.name,
+        "metrics_csv_sha256": sha256_file(table_csv_path),
+        "metrics_tex": table_tex_path.name,
+        "metrics_tex_sha256": sha256_file(table_tex_path),
     }
 
 
@@ -1128,6 +1096,7 @@ def load_model_and_tokenizer(*, device_name: str, local_files_only: bool):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    seed_config = set_reproducible_seeds(torch, CASE_MASTER_SEED)
     torch.set_num_threads(TORCH_THREADS)
     try:
         torch.set_num_interop_threads(1)
@@ -1155,21 +1124,23 @@ def load_model_and_tokenizer(*, device_name: str, local_files_only: bool):
     model.to(device)
     model.eval()
     checkpoint = validate_loaded_model(model, tokenizer)
-    return tokenizer, model, torch, device, checkpoint
+    return tokenizer, model, torch, device, checkpoint, seed_config
 
 
 def run_smoke(tokenizer, model, torch, source_text: str) -> int:
     source_ids = list(tokenizer(source_text, add_special_tokens=False).input_ids)
     smoke_source_ids = source_ids[:13]
-    blocks, horizon = _build_plan_from_source_ids(
-        tokenizer,
-        smoke_source_ids,
-        watermark_tokens=2,
-        minimum_human_tokens=3,
-    )
+    blocks = [
+        {
+            "name": "Smoke human source",
+            "kind": "human",
+            "fixed_token_ids": smoke_source_ids,
+            "length": len(smoke_source_ids),
+        }
+    ]
     generated = generate_mixed_document(tokenizer, model, torch, blocks)
     pivots = np.asarray(generated["pivot_y"])
-    if horizon != 13 or pivots.shape != (13,) or not np.all((pivots > 0) & (pivots < 1)):
+    if pivots.shape != (13,) or not np.all((pivots > 0) & (pivots < 1)):
         raise RuntimeError("model smoke failed")
     detector = run_refreshing_from_pivots(
         pivots,
@@ -1182,7 +1153,7 @@ def run_smoke(tokenizer, model, torch, source_text: str) -> int:
             {
                 "status": "passed",
                 "profile": "non-scientific-smoke",
-                "tokens": horizon,
+                "tokens": 13,
                 "reports": len(detector.reports),
             },
             sort_keys=True,
@@ -1224,7 +1195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print(f"loading {MODEL_NAME}@{MODEL_REVISION} in float32", flush=True)
     load_started = time.perf_counter()
-    tokenizer, model, torch, device, checkpoint = load_model_and_tokenizer(
+    tokenizer, model, torch, device, checkpoint, seed_config = load_model_and_tokenizer(
         device_name=args.device,
         local_files_only=args.local_files_only,
     )
@@ -1233,8 +1204,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.smoke:
         return run_smoke(tokenizer, model, torch, source_text)
 
-    blocks, horizon, source_ids = build_block_plan(tokenizer, source_text)
+    blocks, source_ids = build_block_plan(tokenizer, source_text)
     generated = generate_mixed_document(tokenizer, model, torch, blocks)
+    horizon = int(generated["horizon"])
     pivots = np.asarray(generated["pivot_y"], dtype=np.float64)
     detector = run_refreshing_from_pivots(
         pivots,
@@ -1276,6 +1248,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "case_id": CASE_ID,
         "single_path_descriptive_only": True,
         "no_seed_selection_regeneration_or_outcome_retry": True,
+        "design_change_protocol": (
+            "after inspecting seeds 20260921091501 and 20260921091502, the block geometry "
+            "was changed to a locked 80/100/80/100/80 sentence-aligned target; this design "
+            "uses one fresh seed and its first completed run is accepted without retry"
+        ),
+        "sentence_aligned_replacements": True,
+        "generated_blocks_end_at_sentence_boundaries": True,
         "source_pdf_basename": SOURCE_PDF_BASENAME,
         "source_pdf_sha256": SOURCE_PDF_SHA256,
         "source_excerpt_sha256": SOURCE_EXCERPT_SHA256,
@@ -1300,6 +1279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "ordinary_stream": ORDINARY_STREAM,
         "ordinary_stream_use": "unused because null tokens are fixed human tokens",
         "ordinary_stream_seed_words": generated["ordinary_stream_seed_words"],
+        "global_seed_configuration": seed_config,
         "prompt": PROMPT,
         "prompt_token_count": generated["prompt_token_count"],
         "threshold_exact": THRESHOLD_EXACT,

@@ -28,14 +28,14 @@ PRIMARY = RESULTS / "primary" / "path_metrics.csv"
 PROCESSES = RESULTS / "processes" / "path_metrics.csv"
 FIXED = RESULTS / "fixed" / "opt_path_metrics.csv"
 STUDY_PATHS = ROOT / "study_paths"
-HUMAN_WATERMARK_DEFAULT = ROOT / "human_watermark.npz"
+HUMAN_WATERMARK_DEFAULT = RESULTS / "efron_case" / "case_arrays.npz"
 HUMAN_WATERMARK = Path(
     os.environ.get("HUMAN_WATERMARK_NPZ", str(HUMAN_WATERMARK_DEFAULT))
 ).resolve()
 OUTPUT = RESULTS / "paper_outputs"
 FIGURES = OUTPUT / "figures"
 THRESHOLD_EXACT = 48.897201698676575
-HUMAN_WATERMARK_SHA256 = "1c1fe3bee0f20bdc8be13e8c90ba06d85a402bdd25a1a92b5dab925583d79ab6"
+HUMAN_WATERMARK_SHA256 = "8adcb110124d44bc0436d8380dab8dcc83302ccdf706ab9bf906122a34b4225b"
 
 REPORT_LABELS = {
     "swz_one_shot_general_fdr10": "First alarm + global min.",
@@ -447,11 +447,11 @@ def build_human_watermark_figure() -> None:
         pivots = np.asarray(archive["pivot_y"], dtype=np.float64)
         truth = np.asarray(archive["is_watermarked"], dtype=bool)
 
-    regions = (Region(82, 181), Region(263, 362))
+    regions = (Region(87, 184), Region(262, 384))
     expected_truth = np.zeros(pivots.size, dtype=bool)
     for region in regions:
         expected_truth[region.start - 1 : region.end] = True
-    if pivots.size != 443 or not np.array_equal(truth, expected_truth):
+    if pivots.size != 447 or not np.array_equal(truth, expected_truth):
         raise RuntimeError("human/watermark case design changed")
 
     detector = run_refreshing_from_pivots(
@@ -467,7 +467,7 @@ def build_human_watermark_figure() -> None:
     token_fdp = float(metrics["false_positive_tokens"]) / max(
         int(metrics["predicted_tokens"]), 1
     )
-    expected = (30, 0.965, 0.0, 0.965)
+    expected = (33, 0.9095022624434389, 0.2178988326848249, 0.7256317689530686)
     observed = (
         len(detector.reports),
         float(metrics["token_recall"]),
@@ -486,11 +486,11 @@ def build_human_watermark_figure() -> None:
     grid = "#D5DEE3"
     positions = np.arange(1, pivots.size + 1)
     blocks = (
-        (1, 81, "H", human_color),
-        (82, 181, "WM", watermark_color),
-        (182, 262, "H", human_color),
-        (263, 362, "WM", watermark_color),
-        (363, 443, "H", human_color),
+        (1, 86, "H", human_color),
+        (87, 184, "WM", watermark_color),
+        (185, 261, "H", human_color),
+        (262, 384, "WM", watermark_color),
+        (385, 447, "H", human_color),
     )
 
     FIGURES.mkdir(parents=True, exist_ok=True)

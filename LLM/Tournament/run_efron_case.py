@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Run the prespecified Efron human-versus-Tournament case study.
+"""Run the sentence-aligned Efron human-versus-Tournament case study.
 
-Four prose paragraphs from Efron's *Large-Scale Inference* are tokenized once.
-Two disjoint 100-token source spans are replaced by exact full-vocabulary
-30-layer Tournament OPT-1.3B continuations, leaving an H-W-H-W-H document of
-the same token length as the source. Human tokens are fixed without inspecting
-the current fresh random table; randomized-Binomial pivots are exact under the
-null. This is one descriptive path, never a Monte Carlo estimate.
+A deterministic sentence-boundary optimizer fixes an approximately
+80/100/80/100/80 source partition before generation. The two 100-token target
+spans are replaced by complete, context-conditioned, 30-layer
+Tournament-watermarked OPT-1.3B sentences. This is one descriptive path, never
+a Monte Carlo estimate.
 """
 
 from __future__ import annotations
 
 import argparse
+import codecs
 from dataclasses import asdict
 import hashlib
 import json
@@ -25,16 +25,27 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+from sentence_aligned_case import (
+    assign_output_intervals,
+    build_sentence_aligned_plan,
+    finalize_generated_block,
+    set_reproducible_seeds,
+    should_stop_generated_block,
+    write_blind_text,
+)
+from case_artifacts import render_refreshing_process
+
 from efron_contract import (
     ALLOWED_METRICS,
-    ALTERNATIVE_INTERVALS,
     BIT_GENERATOR,
-    BLOCK_LENGTHS,
     CASE_ID,
     CASE_MASTER_SEED,
     DETECTOR_STRATEGY,
     LAYERS,
-    MIN_HUMAN_BLOCK_TOKENS,
     MODEL_DTYPE,
     MODEL_NAME,
     MODEL_PARAMETER_COUNT,
@@ -55,7 +66,6 @@ from efron_contract import (
     THRESHOLD_DISPLAY,
     THRESHOLD_EXACT,
     TOURNAMENT_SAMPLE_STREAM,
-    WATERMARK_BLOCK_TOKENS,
     validate_source,
 )
 from refreshing_swz import Region, path_metrics, run_refreshing_from_pivots
@@ -121,92 +131,10 @@ def load_frozen_source(path: Path = DEFAULT_SOURCE) -> str:
     return text
 
 
-def balanced_human_lengths(
-    horizon: int,
-    watermark_tokens: int = WATERMARK_BLOCK_TOKENS,
-    minimum_human_tokens: int = MIN_HUMAN_BLOCK_TOKENS,
-) -> tuple[int, int, int]:
-    """Prespecified, outcome-independent human split for H-W-H-W-H."""
-
-    if watermark_tokens < 1:
-        raise ValueError("watermark_tokens must be positive")
-    remaining = horizon - 2 * watermark_tokens
-    if remaining < 3 * minimum_human_tokens:
-        raise ValueError("source is too short for two watermark replacements")
-    base, extra = divmod(remaining, 3)
-    lengths = tuple(base + int(index < extra) for index in range(3))
-    if max(lengths) - min(lengths) > 1 or sum(lengths) != remaining:
-        raise AssertionError("balanced human split failed")
-    return lengths  # type: ignore[return-value]
-
-
-def _build_plan_from_source_ids(
-    tokenizer,
-    source_ids: Sequence[int],
-    *,
-    watermark_tokens: int,
-    minimum_human_tokens: int,
-) -> tuple[list[dict], int]:
-    horizon = len(source_ids)
-    human_lengths = balanced_human_lengths(
-        horizon,
-        watermark_tokens=watermark_tokens,
-        minimum_human_tokens=minimum_human_tokens,
-    )
-    pattern = ("human", "watermarked", "human", "watermarked", "human")
-    lengths = (
-        human_lengths[0],
-        watermark_tokens,
-        human_lengths[1],
-        watermark_tokens,
-        human_lengths[2],
-    )
-    blocks: list[dict] = []
-    source_cursor = 0
-    output_cursor = 1
-    human_index = 0
-    watermark_index = 0
-    for kind, length in zip(pattern, lengths, strict=True):
-        source_slice = list(source_ids[source_cursor : source_cursor + length])
-        if len(source_slice) != length:
-            raise AssertionError("source plan overran the excerpt")
-        if kind == "human":
-            human_index += 1
-            name = f"Human source {human_index}"
-            fixed_ids: list[int] | None = source_slice
-        else:
-            watermark_index += 1
-            name = f"Watermarked replacement {watermark_index}"
-            fixed_ids = None
-        blocks.append(
-            {
-                "name": name,
-                "kind": kind,
-                "start": output_cursor,
-                "end": output_cursor + length - 1,
-                "length": length,
-                "source_start": source_cursor + 1,
-                "source_end": source_cursor + length,
-                "source_token_sha256": token_ids_sha256(source_slice),
-                "fixed_token_ids": fixed_ids,
-                "output_token_ids": None,
-                "output_text_sha256": None,
-            }
-        )
-        source_cursor += length
-        output_cursor += length
-    if source_cursor != horizon or output_cursor - 1 != horizon:
-        raise AssertionError("block plan did not consume the source exactly")
-    return blocks, horizon
-
-
 def build_block_plan(
     tokenizer,
     source_text: str,
-    *,
-    watermark_tokens: int = WATERMARK_BLOCK_TOKENS,
-    minimum_human_tokens: int = MIN_HUMAN_BLOCK_TOKENS,
-) -> tuple[list[dict], int, list[int]]:
+) -> tuple[list[dict], list[int]]:
     source_ids = list(tokenizer(source_text, add_special_tokens=False).input_ids)
     if not source_ids:
         raise RuntimeError("source tokenization is empty")
@@ -225,23 +153,10 @@ def build_block_plan(
             )
         if token_ids_sha256(source_ids) != SOURCE_OPT_TOKEN_SHA256:
             raise RuntimeError("pinned Efron source token IDs changed")
-    blocks, horizon = _build_plan_from_source_ids(
-        tokenizer,
-        source_ids,
-        watermark_tokens=watermark_tokens,
-        minimum_human_tokens=minimum_human_tokens,
-    )
-    if sha256_text(source_text) == SOURCE_EXCERPT_SHA256:
-        if tuple(int(block["length"]) for block in blocks) != BLOCK_LENGTHS:
-            raise RuntimeError("frozen block lengths changed")
-        intervals = tuple(
-            (int(block["start"]), int(block["end"]))
-            for block in blocks
-            if block["kind"] == "watermarked"
-        )
-        if intervals != ALTERNATIVE_INTERVALS:
-            raise RuntimeError("frozen alternative intervals changed")
-    return blocks, horizon, source_ids
+    blocks, planned_source_ids = build_sentence_aligned_plan(tokenizer, source_text)
+    if source_ids != planned_source_ids:
+        raise AssertionError("sentence-aligned planner changed the source tokenization")
+    return blocks, source_ids
 
 
 def report_union_mask(reports: Iterable, horizon: int) -> np.ndarray:
@@ -292,11 +207,16 @@ def validate_loaded_model(model, tokenizer) -> str:
 
 
 def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> dict[str, object]:
-    horizon = sum(int(block["length"]) for block in blocks)
     prompt_ids = list(tokenizer(PROMPT, add_special_tokens=False).input_ids)
     if not prompt_ids:
         raise RuntimeError("prompt tokenization is empty")
-    if len(prompt_ids) + horizon > int(model.config.max_position_embeddings):
+    maximum_horizon = sum(
+        len(block["fixed_token_ids"])
+        if block["kind"] == "human"
+        else int(block["maximum_tokens"])
+        for block in blocks
+    )
+    if len(prompt_ids) + maximum_horizon > int(model.config.max_position_embeddings):
         raise RuntimeError("mixed document exceeds the pinned model context window")
 
     vocab_size = int(model.config.vocab_size)
@@ -312,16 +232,16 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
     ordinary_seed = np.random.SeedSequence(
         CASE_MASTER_SEED, spawn_key=(ORDINARY_STREAM,)
     ).generate_state(4)
-    token_ids = np.empty(horizon, dtype=np.int32)
-    selected_g = np.empty((horizon, LAYERS), dtype=np.uint8)
-    pivot_s = np.empty(horizon, dtype=np.uint8)
-    pivot_v = np.empty(horizon, dtype=np.float64)
-    pivots = np.empty(horizon, dtype=np.float64)
-    calibrator_l = np.empty(horizon, dtype=np.float64)
-    is_watermarked = np.empty(horizon, dtype=bool)
-    block_index = np.empty(horizon, dtype=np.int8)
-    is_eos = np.empty(horizon, dtype=bool)
-    max_mass_correction = np.zeros(horizon, dtype=np.float64)
+    token_ids: list[int] = []
+    selected_g: list[np.ndarray] = []
+    pivot_s: list[int] = []
+    pivot_v: list[float] = []
+    pivots: list[float] = []
+    calibrator_l: list[float] = []
+    is_watermarked: list[bool] = []
+    block_index: list[int] = []
+    is_eos: list[bool] = []
+    max_mass_correction: list[float] = []
     eos_id = tokenizer.eos_token_id
 
     device = next(model.parameters()).device
@@ -333,7 +253,6 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
     table_generator.manual_seed(table_seed)
     prompt_tensor = torch.tensor([prompt_ids], dtype=torch.long, device=device)
     started = time.perf_counter()
-    zero_t = 0
     with torch.inference_mode():
         initial = model(prompt_tensor, use_cache=True)
         next_logits = initial.logits[0, -1, :].detach()
@@ -341,7 +260,8 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
         for current_block_index, block in enumerate(blocks):
             human_ids = block["fixed_token_ids"] if block["kind"] == "human" else None
             generated_ids: list[int] = []
-            for offset in range(int(block["length"])):
+            offset = 0
+            while True:
                 scaled_logits = next_logits / TEMPERATURE
                 scaled_logits = torch.where(
                     torch.isfinite(scaled_logits),
@@ -390,7 +310,7 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
                     bits = np.asarray(
                         [int(g[chosen_id].item()) for g in g_layers], dtype=np.uint8
                     )
-                    max_mass_correction[zero_t] = largest
+                    mass_correction = largest
                 else:
                     # Lazy sampling of the selected coordinates of the unused
                     # full table is exactly equivalent at an ordinary position.
@@ -406,43 +326,59 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
                         .cpu()
                         .numpy()
                     )
+                    mass_correction = 0.0
 
-                token_ids[zero_t] = chosen_id
-                selected_g[zero_t] = bits
-                pivot_s[zero_t] = int(bits.sum())
-                pivot_v[zero_t] = float(pivot_rng.random())
-                pivots[zero_t] = float(
+                score = int(bits.sum())
+                randomizer = float(pivot_rng.random())
+                pivot = float(
                     binomial_randomized_pit(
-                        np.asarray([pivot_s[zero_t]]),
-                        np.asarray([pivot_v[zero_t]]),
+                        np.asarray([score]),
+                        np.asarray([randomizer]),
                     )[0]
                 )
-                calibrator_l[zero_t] = float(
-                    stable_calibrator(np.asarray([pivots[zero_t]]))[0]
-                )
-                is_watermarked[zero_t] = block["kind"] == "watermarked"
-                block_index[zero_t] = current_block_index
-                is_eos[zero_t] = eos_id is not None and chosen_id == eos_id
+                token_ids.append(chosen_id)
+                selected_g.append(np.asarray(bits, dtype=np.uint8))
+                pivot_s.append(score)
+                pivot_v.append(randomizer)
+                pivots.append(pivot)
+                calibrator_l.append(float(stable_calibrator(np.asarray([pivot]))[0]))
+                is_watermarked.append(block["kind"] == "watermarked")
+                block_index.append(current_block_index)
+                is_eos.append(eos_id is not None and chosen_id == eos_id)
+                max_mass_correction.append(mass_correction)
                 generated_ids.append(chosen_id)
 
                 chosen = torch.tensor([[chosen_id]], dtype=torch.long, device=device)
                 updated = model(chosen, past_key_values=past, use_cache=True)
                 next_logits = updated.logits[0, -1, :].detach()
                 past = updated.past_key_values
-                zero_t += 1
-                if zero_t % 100 == 0 or zero_t == horizon:
-                    print(f"generated/scored {zero_t}/{horizon} monitored tokens", flush=True)
+                offset += 1
+                if len(token_ids) % 100 == 0:
+                    print(f"generated/scored {len(token_ids)} monitored tokens", flush=True)
+                if human_ids is not None:
+                    if offset >= len(human_ids):
+                        block["length"] = len(generated_ids)
+                        block["output_token_ids"] = generated_ids
+                        block["output_text_sha256"] = sha256_text(
+                            tokenizer.decode(
+                                generated_ids,
+                                skip_special_tokens=False,
+                                clean_up_tokenization_spaces=False,
+                            )
+                        )
+                        break
+                elif should_stop_generated_block(
+                    tokenizer,
+                    generated_ids,
+                    minimum_tokens=int(block["minimum_tokens"]),
+                    maximum_tokens=int(block["maximum_tokens"]),
+                ):
+                    finalize_generated_block(tokenizer, block, generated_ids)
+                    break
 
-            block["output_token_ids"] = generated_ids
-            block_text = tokenizer.decode(
-                generated_ids,
-                skip_special_tokens=False,
-                clean_up_tokenization_spaces=False,
-            )
-            block["output_text_sha256"] = sha256_text(block_text)
-
-    if zero_t != horizon:
-        raise AssertionError("generation stopped before the frozen horizon")
+    horizon = assign_output_intervals(blocks)
+    if len(token_ids) != horizon:
+        raise AssertionError("generated arrays and block intervals disagree")
     expected_truth = np.asarray(
         [
             block["kind"] == "watermarked"
@@ -451,19 +387,22 @@ def generate_mixed_document(tokenizer, model, torch, blocks: Sequence[dict]) -> 
         ],
         dtype=bool,
     )
-    if not np.array_equal(is_watermarked, expected_truth):
+    truth_array = np.asarray(is_watermarked, dtype=bool)
+    if not np.array_equal(truth_array, expected_truth):
         raise AssertionError("truth mask does not match the frozen block plan")
+    print(f"generated/scored {horizon}/{horizon} monitored tokens", flush=True)
     return {
-        "token_id": token_ids,
-        "selected_g": selected_g,
-        "pivot_s": pivot_s,
-        "pivot_v": pivot_v,
-        "pivot_y": pivots,
-        "calibrator_l": calibrator_l,
-        "is_watermarked": is_watermarked,
-        "block_index": block_index,
-        "is_eos": is_eos,
-        "max_mass_correction": max_mass_correction,
+        "token_id": np.asarray(token_ids, dtype=np.int32),
+        "selected_g": np.asarray(selected_g, dtype=np.uint8),
+        "pivot_s": np.asarray(pivot_s, dtype=np.uint8),
+        "pivot_v": np.asarray(pivot_v, dtype=np.float64),
+        "pivot_y": np.asarray(pivots, dtype=np.float64),
+        "calibrator_l": np.asarray(calibrator_l, dtype=np.float64),
+        "is_watermarked": truth_array,
+        "block_index": np.asarray(block_index, dtype=np.int8),
+        "is_eos": np.asarray(is_eos, dtype=bool),
+        "max_mass_correction": np.asarray(max_mass_correction, dtype=np.float64),
+        "horizon": horizon,
         "generation_seconds": time.perf_counter() - started,
         "prompt_token_count": len(prompt_ids),
         "ordinary_stream_seed_words": [int(value) for value in ordinary_seed],
@@ -477,26 +416,138 @@ def token_masks_to_character_masks(
     truth: Sequence[bool],
     selected: Sequence[bool],
 ) -> tuple[np.ndarray, np.ndarray]:
-    encoded = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)
-    if list(encoded.input_ids) != list(token_ids):
-        raise RuntimeError("mixed text does not re-encode to the saved token IDs")
+    """Map saved OPT token masks without assuming unique BPE re-encoding."""
+
     if len(truth) != len(token_ids) or len(selected) != len(token_ids):
         raise ValueError("token masks have the wrong length")
+    encoded = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)
+    if list(encoded.input_ids) == list(token_ids):
+        truth_chars = np.zeros(len(text), dtype=bool)
+        selected_chars = np.zeros(len(text), dtype=bool)
+        touched = np.zeros(len(text), dtype=bool)
+        for (start, end), is_truth, is_selected in zip(
+            encoded.offset_mapping,
+            truth,
+            selected,
+            strict=True,
+        ):
+            if end > start:
+                truth_chars[start:end] = bool(is_truth)
+                selected_chars[start:end] = bool(is_selected)
+                touched[start:end] = True
+        visible = ~np.asarray([character.isspace() for character in text])
+        if text and not np.all(touched | ~visible):
+            raise RuntimeError("fast-tokenizer offsets left visible characters unmapped")
+        return truth_chars, selected_chars
+
+    pieces = [
+        tokenizer.decode(
+            [int(token_id)],
+            skip_special_tokens=False,
+            clean_up_tokenization_spaces=False,
+        )
+        for token_id in token_ids
+    ]
+    if "".join(pieces) == text:
+        truth_chars = np.zeros(len(text), dtype=bool)
+        selected_chars = np.zeros(len(text), dtype=bool)
+        cursor = 0
+        for piece, is_truth, is_selected in zip(pieces, truth, selected, strict=True):
+            end = cursor + len(piece)
+            truth_chars[cursor:end] = bool(is_truth)
+            selected_chars[cursor:end] = bool(is_selected)
+            cursor = end
+        return truth_chars, selected_chars
+
+    return byte_level_token_masks_to_character_masks(
+        tokenizer, text, token_ids, truth, selected
+    )
+
+
+def gpt2_byte_decoder() -> dict[str, int]:
+    byte_values = (
+        list(range(ord("!"), ord("~") + 1))
+        + list(range(ord("¡"), ord("¬") + 1))
+        + list(range(ord("®"), ord("ÿ") + 1))
+    )
+    unicode_values = list(byte_values)
+    offset = 0
+    for byte in range(256):
+        if byte not in byte_values:
+            byte_values.append(byte)
+            unicode_values.append(256 + offset)
+            offset += 1
+    return {
+        chr(character): byte
+        for byte, character in zip(byte_values, unicode_values, strict=True)
+    }
+
+
+def byte_level_token_masks_to_character_masks(
+    tokenizer,
+    text: str,
+    token_ids: Sequence[int],
+    truth: Sequence[bool],
+    selected: Sequence[bool],
+) -> tuple[np.ndarray, np.ndarray]:
+    byte_decoder = gpt2_byte_decoder()
+    tokens = tokenizer.convert_ids_to_tokens(list(token_ids))
+    if isinstance(tokens, str):
+        tokens = [tokens]
+    if len(tokens) != len(token_ids):
+        raise RuntimeError("tokenizer returned the wrong number of token strings")
+
+    special_ids = set(getattr(tokenizer, "all_special_ids", ()))
+    raw = bytearray()
+    byte_owners: list[int] = []
+    for index, (token_id, token) in enumerate(zip(token_ids, tokens, strict=True)):
+        if int(token_id) in special_ids:
+            token_bytes = tokenizer.decode(
+                [int(token_id)],
+                skip_special_tokens=False,
+                clean_up_tokenization_spaces=False,
+            ).encode("utf-8")
+        else:
+            try:
+                token_bytes = bytes(byte_decoder[character] for character in token)
+            except KeyError as error:
+                raise RuntimeError(
+                    "saved tokens cannot be mapped with the OPT byte decoder"
+                ) from error
+        raw.extend(token_bytes)
+        byte_owners.extend([index] * len(token_bytes))
+
+    error_spans: list[tuple[int, int]] = []
+
+    def record_decode_error(error: UnicodeDecodeError) -> tuple[str, int]:
+        error_spans.append((error.start, error.end))
+        return "\ufffd", error.end
+
+    error_handler = f"efron_tournament_character_map_{id(error_spans)}"
+    codecs.register_error(error_handler, record_decode_error)
+    decoded = bytes(raw).decode("utf-8", errors=error_handler)
+    if decoded != text:
+        raise RuntimeError("saved OPT token bytes do not reproduce the decoded text")
+
     truth_chars = np.zeros(len(text), dtype=bool)
     selected_chars = np.zeros(len(text), dtype=bool)
-    touched = np.zeros(len(text), dtype=bool)
-    for (start, end), is_truth, is_selected in zip(
-        encoded.offset_mapping,
-        truth,
-        selected,
-        strict=True,
-    ):
-        if end > start:
-            truth_chars[start:end] = bool(is_truth)
-            selected_chars[start:end] = bool(is_selected)
-            touched[start:end] = True
-    if text and not np.all(touched | np.asarray([character.isspace() for character in text])):
-        raise RuntimeError("fast-tokenizer offsets left visible characters unmapped")
+    byte_cursor = 0
+    error_cursor = 0
+    for character_index, character in enumerate(text):
+        if error_cursor < len(error_spans) and error_spans[error_cursor][0] == byte_cursor:
+            end = error_spans[error_cursor][1]
+            error_cursor += 1
+        else:
+            encoded_character = character.encode("utf-8")
+            end = byte_cursor + len(encoded_character)
+            if bytes(raw[byte_cursor:end]) != encoded_character:
+                raise RuntimeError("could not align decoded OPT text with token bytes")
+        owners = byte_owners[byte_cursor:end]
+        truth_chars[character_index] = any(bool(truth[owner]) for owner in owners)
+        selected_chars[character_index] = any(bool(selected[owner]) for owner in owners)
+        byte_cursor = end
+    if byte_cursor != len(raw) or error_cursor != len(error_spans):
+        raise RuntimeError("OPT token-byte mapping did not consume the decoded text")
     return truth_chars, selected_chars
 
 
@@ -757,9 +808,10 @@ def latex_figure_fragment(metrics: dict[str, float | int], pdf_name: str) -> str
 \centering
 \includegraphics[width=\linewidth]{{{pdf_name}}}
 \caption{{A prespecified mixed human/watermarked excerpt from Bradley Efron's
-\emph{{Large-Scale Inference}}. Two 100-token source spans are replaced by
-Tournament-watermarked OPT-1.3B continuations, and paragraph breaks are collapsed for
-display only. All AI text is italic. Every rejected span is colored and
+\emph{{Large-Scale Inference}}. Two spans of complete source sentences are
+replaced by complete, Tournament-watermarked OPT-1.3B sentences generated from
+the preceding context. Paragraph breaks are collapsed for display only. All AI
+text is italic. Every rejected span is colored and
 underlined: blue for a true rejection of AI text and vermillion for a false
 rejection of human text. The one-path values are
 Power={float(metrics['token_power']):.3f}, FDP={float(metrics['token_fdp']):.3f},
@@ -906,6 +958,16 @@ def build_derived_artifacts(
     png_path = output_dir / "efron_tournament_case_box.png"
     tex_path = output_dir / "efron_tournament_case_box.tex"
     direct_tex_path = output_dir / "efron_mixed_passage.tex"
+    process_pdf_path = output_dir / "efron_tournament_refreshing_process.pdf"
+    process_png_path = output_dir / "efron_tournament_refreshing_process.png"
+    mixed_text = tokenizer.decode(
+        arrays["token_id"].astype(int).tolist(),
+        skip_special_tokens=False,
+        clean_up_tokenization_spaces=False,
+    )
+    blind_path = write_blind_text(output_dir, mixed_text)
+    table_csv_path = output_dir / "efron_tournament_case_metrics.csv"
+    table_tex_path = output_dir / "efron_tournament_case_metrics.tex"
     render_case_box(
         tokenizer,
         pdf_path,
@@ -926,6 +988,41 @@ def build_derived_artifacts(
             metrics,
         ),
     )
+    detector = run_refreshing_from_pivots(
+        np.asarray(arrays["pivot_y"], dtype=float),
+        strategy=DETECTOR_STRATEGY,
+        threshold=THRESHOLD_EXACT,
+        cap=SWZ_CAP,
+    )
+    if not np.array_equal(
+        report_union_mask(detector.reports, len(arrays["pivot_y"])),
+        arrays["selected_by_any_report"],
+    ):
+        raise RuntimeError("refreshing-process replay differs from saved selection")
+    render_refreshing_process(
+        process_pdf_path,
+        process_png_path,
+        arrays,
+        blocks,
+        detector,
+        threshold=THRESHOLD_EXACT,
+        watermark_label="Tournament-watermarked OPT-1.3B",
+    )
+    write_text_atomic(
+        table_csv_path,
+        "watermark,reports,token_power,token_fdp,token_iou,final_report_fdp,report_ufdp\n"
+        f"Tournament,{int(metrics['reports'])},{float(metrics['token_power']):.9f},"
+        f"{float(metrics['token_fdp']):.9f},{float(metrics['token_iou']):.9f},"
+        f"{float(metrics['final_report_fdp']):.9f},{float(metrics['report_ufdp']):.9f}\n",
+    )
+    write_text_atomic(
+        table_tex_path,
+        "Tournament & "
+        f"{int(metrics['reports'])} & {float(metrics['token_power']):.3f} & "
+        f"{float(metrics['token_fdp']):.3f} & {float(metrics['token_iou']):.3f} & "
+        f"{float(metrics['final_report_fdp']):.3f} & "
+        f"{float(metrics['report_ufdp']):.3f} \\\\\n",
+    )
     return {
         "figure_pdf": pdf_path.name,
         "figure_pdf_sha256": sha256_file(pdf_path),
@@ -935,6 +1032,16 @@ def build_derived_artifacts(
         "latex_fragment_sha256": sha256_file(tex_path),
         "direct_mixed_passage_tex": direct_tex_path.name,
         "direct_mixed_passage_tex_sha256": sha256_file(direct_tex_path),
+        "refreshing_process_pdf": process_pdf_path.name,
+        "refreshing_process_pdf_sha256": sha256_file(process_pdf_path),
+        "refreshing_process_png": process_png_path.name,
+        "refreshing_process_png_sha256": sha256_file(process_png_path),
+        "blind_mixed_text": blind_path.name,
+        "blind_mixed_text_sha256": sha256_file(blind_path),
+        "metrics_csv": table_csv_path.name,
+        "metrics_csv_sha256": sha256_file(table_csv_path),
+        "metrics_tex": table_tex_path.name,
+        "metrics_tex_sha256": sha256_file(table_tex_path),
     }
 
 
@@ -979,6 +1086,7 @@ def load_model_and_tokenizer(*, device_name: str, local_files_only: bool):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    seed_config = set_reproducible_seeds(torch, CASE_MASTER_SEED)
     torch.set_num_threads(TORCH_THREADS)
     try:
         torch.set_num_interop_threads(1)
@@ -1006,21 +1114,23 @@ def load_model_and_tokenizer(*, device_name: str, local_files_only: bool):
     model.to(device)
     model.eval()
     checkpoint = validate_loaded_model(model, tokenizer)
-    return tokenizer, model, torch, device, checkpoint
+    return tokenizer, model, torch, device, checkpoint, seed_config
 
 
 def run_smoke(tokenizer, model, torch, source_text: str) -> int:
     source_ids = list(tokenizer(source_text, add_special_tokens=False).input_ids)
     smoke_source_ids = source_ids[:13]
-    blocks, horizon = _build_plan_from_source_ids(
-        tokenizer,
-        smoke_source_ids,
-        watermark_tokens=2,
-        minimum_human_tokens=3,
-    )
+    blocks = [
+        {
+            "name": "Smoke human source",
+            "kind": "human",
+            "fixed_token_ids": smoke_source_ids,
+            "length": len(smoke_source_ids),
+        }
+    ]
     generated = generate_mixed_document(tokenizer, model, torch, blocks)
     pivots = np.asarray(generated["pivot_y"])
-    if horizon != 13 or pivots.shape != (13,) or not np.all((pivots > 0) & (pivots < 1)):
+    if pivots.shape != (13,) or not np.all((pivots > 0) & (pivots < 1)):
         raise RuntimeError("model smoke failed")
     detector = run_refreshing_from_pivots(
         pivots,
@@ -1033,7 +1143,7 @@ def run_smoke(tokenizer, model, torch, source_text: str) -> int:
             {
                 "status": "passed",
                 "profile": "non-scientific-smoke",
-                "tokens": horizon,
+                "tokens": 13,
                 "reports": len(detector.reports),
             },
             sort_keys=True,
@@ -1075,7 +1185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print(f"loading {MODEL_NAME}@{MODEL_REVISION} in float32", flush=True)
     load_started = time.perf_counter()
-    tokenizer, model, torch, device, checkpoint = load_model_and_tokenizer(
+    tokenizer, model, torch, device, checkpoint, seed_config = load_model_and_tokenizer(
         device_name=args.device,
         local_files_only=args.local_files_only,
     )
@@ -1084,8 +1194,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.smoke:
         return run_smoke(tokenizer, model, torch, source_text)
 
-    blocks, horizon, source_ids = build_block_plan(tokenizer, source_text)
+    blocks, source_ids = build_block_plan(tokenizer, source_text)
     generated = generate_mixed_document(tokenizer, model, torch, blocks)
+    horizon = int(generated["horizon"])
     pivots = np.asarray(generated["pivot_y"], dtype=np.float64)
     detector = run_refreshing_from_pivots(
         pivots,
@@ -1134,6 +1245,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "case_id": CASE_ID,
         "single_path_descriptive_only": True,
         "no_seed_selection_regeneration_or_outcome_retry": True,
+        "design_change_protocol": (
+            "after inspecting seeds 20260921091501 and 20260921091502, the block geometry "
+            "was changed to a locked 80/100/80/100/80 sentence-aligned target; this design "
+            "uses one fresh seed and its first completed run is accepted without retry"
+        ),
+        "sentence_aligned_replacements": True,
+        "generated_blocks_end_at_sentence_boundaries": True,
         "source_url": SOURCE_URL,
         "source_pdf_sha256": SOURCE_PDF_SHA256,
         "source_excerpt_sha256": SOURCE_EXCERPT_SHA256,
@@ -1161,6 +1279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "tournament_sample_stream": TOURNAMENT_SAMPLE_STREAM,
         "ordinary_stream_use": "unused because null tokens are fixed human tokens",
         "ordinary_stream_seed_words": generated["ordinary_stream_seed_words"],
+        "global_seed_configuration": seed_config,
         "prompt": PROMPT,
         "prompt_token_count": generated["prompt_token_count"],
         "threshold_exact": THRESHOLD_EXACT,

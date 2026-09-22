@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parents[1]
 RESULTS = REPO_ROOT / "results" / "llm" / "tournament"
 STUDY_RESULTS = RESULTS / "study"
-CASE_RESULTS = RESULTS / "efron_case"
+CASE_RESULTS = REPO_ROOT / "results" / "llm" / "tournament_efron_case"
 TRACES = STUDY_RESULTS / "traces"
 GENERATED = RESULTS / "paper_outputs"
 

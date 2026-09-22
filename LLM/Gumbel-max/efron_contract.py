@@ -38,24 +38,20 @@ SOURCE_OPT_TOKEN_SHA256 = (
 )
 
 PROMPT = "Large-Scale Inference\nBradley Efron\n2010\n\n"
-CASE_ID = "efron-large-scale-inference-human-watermark-opt13b-v1"
-CASE_MASTER_SEED = 20260805090442
+CASE_ID = "efron-large-scale-inference-balanced-sentence-gumbel-opt13b-v4"
+CASE_MASTER_SEED = 20260922000100
 BIT_GENERATOR = "PCG64DXSM"
 KEY_STREAM = 0
 ORDINARY_STREAM = 1
 TEMPERATURE = 1.0
 WATERMARK_BLOCKS = 2
-WATERMARK_BLOCK_TOKENS = 100
-MIN_HUMAN_BLOCK_TOKENS = 25
-BLOCK_LENGTHS = (81, 100, 81, 100, 81)
-ALTERNATIVE_INTERVALS = ((82, 181), (263, 362))
 
 THRESHOLD_EXACT = 49
 THRESHOLD_DISPLAY = 49
 SWZ_CAP = 0.5
 DETECTOR_STRATEGY = "adaptive_cumulative"
 DETECTOR_SOURCE_SHA256 = (
-    "e146a0a76ac8ff3e5e95361e6704b422be3152a99c9ca774f66ae76d46106ca5"
+    "354621e8ebd54244418e9fd9a1003fc84a47ddccf146aea3dd352c79f72ee52c"
 )
 
 ALLOWED_METRICS = (
@@ -120,11 +116,13 @@ def contract_payload() -> dict[str, object]:
         "construction": {
             "pattern": ["human", "watermarked", "human", "watermarked", "human"],
             "watermark_blocks": WATERMARK_BLOCKS,
-            "watermark_tokens_per_block": WATERMARK_BLOCK_TOKENS,
-            "block_lengths": list(BLOCK_LENGTHS),
-            "alternative_intervals": [list(interval) for interval in ALTERNATIVE_INTERVALS],
-            "human_split": "balanced deterministic split of the remaining source tokens",
+            "source_block_targets": [80, 100, 80, 100, 80],
+            "watermark_tokens_per_block": "target 100; first sentence ending at or after token 90; maximum 140",
+            "block_lengths": "sentence-aligned source partition optimized before generation against 80/100/80/100/80",
+            "alternative_intervals": "recorded after deterministic generation",
+            "human_split": "three deterministic sentence-aligned source spans targeting 80 tokens each",
             "replacement_not_insertion": True,
+            "replacement_unit": "complete source sentences",
             "prompt": PROMPT,
         },
         "rng": {
@@ -135,6 +133,13 @@ def contract_payload() -> dict[str, object]:
             "ordinary_stream_use": "unused: null tokens are fixed human tokens",
             "fresh_full_key_at_every_position": True,
             "no_seed_search_regeneration_or_outcome_retry": True,
+            "design_change_protocol": (
+                "after inspecting seeds 20260921091501 and 20260921091502, the block geometry "
+                "was changed to a locked 80/100/80/100/80 sentence-aligned target; this design "
+                "uses one fresh seed and its first completed run is accepted without retry"
+            ),
+            "python_numpy_torch_seeds_explicit": True,
+            "deterministic_torch_algorithms": True,
         },
         "watermark": "exact full-vocabulary Gumbel-max",
         "human_null": "source token fixed without inspecting the current key vector",

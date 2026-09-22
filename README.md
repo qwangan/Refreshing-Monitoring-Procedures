@@ -34,13 +34,12 @@ Install the packages in `LLM/Gumbel-max/requirements.txt`, then run:
 bash LLM/Gumbel-max/run_gpu_study.sh
 ```
 
-The mixed Efron/OPT-1.3B text example in Table 4 and Figure 12 uses four fixed paragraphs from printed page x of Efron's *Large-Scale Inference*. The normalized excerpt is supplied as `efron_excerpt.txt`; `run_efron_case.py` regenerates the prespecified GPU realization. The supplied `human_watermark.npz` is the coauthor's exact saved realization used for the paper figure.
+The mixed Efron/OPT-1.3B text example in Table 4 and Figure 12 uses four fixed paragraphs from printed page x of Efron's *Large-Scale Inference*. The normalized excerpt is supplied as `efron_excerpt.txt`. Before generation, `run_efron_case.py` uses the shared `LLM/sentence_aligned_case.py` helper to choose complete-sentence cuts closest to the target token geometry `80/100/80/100/80`. The two approximately 100-token source passages are then replaced by complete, context-conditioned watermarked sentences. The accepted realization uses master seed `20260922000100`; it was the first completed run after the geometry was locked, with no outcome-based retry.
 
 ```sh
 cd LLM/Gumbel-max
 python run_efron_case.py --device cuda
-HUMAN_WATERMARK_NPZ=../../results/llm/efron_case/case_arrays.npz \
-  python -c "import make_paper_outputs as p; p.build_human_watermark_figure()"
+python -c "import make_paper_outputs as p; p.build_human_watermark_figure()"
 ```
 
 ### Tournament watermark
@@ -50,7 +49,7 @@ HUMAN_WATERMARK_NPZ=../../results/llm/efron_case/case_arrays.npz \
 * `generate_tournament_opt13b.py` generates the 1,400 primary and stress-study paths used in Tables 3, B.7, and B.9.
 * `analyze_tournament_paths.py` performs the refreshing-process replay and calculates those tables.
 * `make_paper_outputs.py` generates Figures 11, 13, B.19, and B.21.
-* `run_efron_case.py` produces the mixed-document experiment in Table 5 and Figure 13 from the hash-checked `efron_excerpt.txt`.
+* `run_efron_case.py` produces the balanced sentence-aligned mixed-document experiment in Table 5 and Figure 13 from the hash-checked `efron_excerpt.txt`, using the same source cuts and master seed as the Gumbel-max case.
 * `tournament_watermark.py` implements the 30-layer Tournament sampler and randomized null pivot, while `refreshing_swz.py` implements the refreshing detector.
 * `run_gpu_study.sh` runs the complete resumable Tournament study on a CUDA GPU.
 
@@ -58,7 +57,7 @@ HUMAN_WATERMARK_NPZ=../../results/llm/efron_case/case_arrays.npz \
 bash LLM/Tournament/run_gpu_study.sh
 ```
 
-Generated outputs are written to `results/llm/tournament/` and are intentionally excluded from the repository. The mixed-document outputs can be rebuilt from saved pivots without regenerating text using `python LLM/Tournament/run_efron_case.py --output-dir results/llm/tournament/efron_case --rebuild-derived --local-files-only`.
+Generated outputs are written under `results/llm/` and are intentionally excluded from the repository. The Gumbel-max mixed-document run writes to `results/llm/efron_case`; the Tournament run writes to `results/llm/tournament_efron_case`. Either set of figures can be rebuilt from saved pivots without regenerating text by adding `--rebuild-derived --local-files-only` to the corresponding `run_efron_case.py` command.
 
 ## Financial backtesting
 
